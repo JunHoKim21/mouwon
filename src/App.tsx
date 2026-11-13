@@ -627,19 +627,19 @@ export default function App() {
 
       {/* Floating Auto-Walk Journey Banner (Top-Center below Header) */}
       {walkingTargetLabel && (
-        <div className="pointer-events-none fixed inset-x-0 top-14 sm:top-16 z-30 flex justify-center px-4">
+        <div className="pointer-events-none fixed inset-x-0 top-[88px] sm:top-16 z-30 flex justify-center px-3 sm:px-4">
           <button
             type="button"
             data-testid="stop-autowalk-btn"
             onClick={() => sceneRef.current?.stopAutoWalk()}
-            className={`pointer-events-auto flex items-center gap-2 max-w-full rounded-xl px-3.5 py-2 text-xs sm:text-sm font-medium border shadow-lg cursor-pointer transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d9842b] ${
+            className={`pointer-events-auto flex items-center gap-2 max-w-full rounded-xl px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs sm:text-sm font-medium border shadow-lg cursor-pointer transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d9842b] ${
               isNight
                 ? 'bg-[#1a2030]/95 border-[#ff9e3b]/40 text-[#ffe8c8] hover:bg-[#252d42]'
                 : 'bg-[#fcfaf5]/95 border-[#d9842b]/45 text-[#2c251d] hover:bg-[#f6efe2]'
             }`}
           >
             <span className="truncate">
-              🐾 {walkingTargetLabel}로 걸어가는 중 · 이동 멈추기 (ESC)
+              🐾 {walkingTargetLabel}로 걸어가는 중 · 이동 멈추기 <span className="hidden sm:inline">(ESC)</span>
             </span>
           </button>
         </div>
@@ -651,8 +651,8 @@ export default function App() {
           role="status"
           aria-live="polite"
           data-testid="onsen-toast"
-          className={`pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4 ${
-            walkingTargetLabel ? 'top-26 sm:top-28' : 'top-14 sm:top-16'
+          className={`pointer-events-none fixed inset-x-0 z-30 flex justify-center px-3 sm:px-4 ${
+            walkingTargetLabel ? 'top-[136px] sm:top-28' : 'top-[88px] sm:top-16'
           }`}
         >
           <div

@@ -1764,7 +1764,7 @@ export function createOnsenWorld(
   // =========================================================================
   // 9. RISING STEAM PARTICLES (BATH + YUZU POND + CREEK + FOOT STREAM) & FALLING SNOW
   // =========================================================================
-  const steamCount = 152;
+  const steamCount = isSoftwareGl ? 56 : 152;
   const steamPositions = new Float32Array(steamCount * 3);
   const steamMeta: {
     originX: number;
@@ -1776,9 +1776,10 @@ export function createOnsenWorld(
   }[] = [];
 
   for (let i = 0; i < steamCount; i++) {
-    const isMainBath = i < 105;
-    const isYuzu = i >= 105 && i < 122;
-    const isFootStream = i >= 135;
+    const ratio = i / steamCount;
+    const isMainBath = ratio < 0.69;
+    const isYuzu = ratio >= 0.69 && ratio < 0.8;
+    const isFootStream = ratio >= 0.89;
     let px = 0;
     let pz = 38;
     if (isMainBath) {
@@ -1828,7 +1829,7 @@ export function createOnsenWorld(
   group.add(steamPoints);
 
   // Falling snowflakes
-  const snowCount = 620;
+  const snowCount = isSoftwareGl ? 180 : 620;
   const snowPositions = new Float32Array(snowCount * 3);
   const snowSpeeds = new Float32Array(snowCount);
   for (let i = 0; i < snowCount; i++) {

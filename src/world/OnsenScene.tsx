@@ -278,13 +278,14 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
 
       const isSoftwareGl = detectSoftwareWebGL();
       const isMobile = detectMobileDevice();
-      const pixelRatioCap = isSoftwareGl ? 1 : isMobile ? 1.2 : 1.75;
+      const lowPerf = isSoftwareGl || isMobile;
+      const pixelRatioCap = lowPerf ? 1 : 1.75;
       const audio = new OnsenAudioEngine();
       audio.updateSettings(mixerRef.current);
       audioRef.current = audio;
 
       const renderer = new THREE.WebGLRenderer({
-        antialias: !isSoftwareGl && !isMobile,
+        antialias: !lowPerf,
         powerPreference: 'high-performance',
         preserveDrawingBuffer: isSoftwareGl,
       });
@@ -294,7 +295,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       renderer.setPixelRatio(
         Math.min(window.devicePixelRatio || 1, pixelRatioCap),
       );
-      renderer.shadowMap.enabled = !isSoftwareGl;
+      renderer.shadowMap.enabled = !lowPerf;
       renderer.shadowMap.type = THREE.PCFShadowMap;
       renderer.setSize(
         container.clientWidth || window.innerWidth,
@@ -350,7 +351,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       sunLight.position.set(-32, 36, 30);
       sunLight.target.position.set(0, 0, 8);
       scene.add(sunLight.target);
-      sunLight.castShadow = !isSoftwareGl;
+      sunLight.castShadow = !lowPerf;
       const shadowRes = isMobile ? 1024 : 2048;
       sunLight.shadow.mapSize.set(shadowRes, shadowRes);
       sunLight.shadow.camera.near = 2;
@@ -369,7 +370,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         renderer.capabilities.getMaxAnisotropy(),
       );
       const textures = createProceduralTextureBundle(maxAnisotropy);
-      const world = createOnsenWorld(textures, isSoftwareGl);
+      const world = createOnsenWorld(textures, lowPerf);
       world.syncWishYuzus(wishYuzusRef.current);
       worldRef.current = world;
       scene.add(world.group);
@@ -1585,8 +1586,12 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         }
 
         for (const nl of world.nightLights) {
-          const flicker = 0.94 + 0.06 * Math.sin(elapsed * 4.2 + nl.baseIntensity);
-          nl.light.intensity = nl.baseIntensity * nightBlend * flicker;
+          const lightVisible = nightBlend > 0.01;
+          nl.light.visible = lightVisible;
+          if (lightVisible) {
+            const flicker = 0.94 + 0.06 * Math.sin(elapsed * 4.2 + nl.baseIntensity);
+            nl.light.intensity = nl.baseIntensity * nightBlend * flicker;
+          }
         }
         for (const lm of world.lanternGlowMaterials) {
           lm.emissiveIntensity = THREE.MathUtils.lerp(0.22, 1.35, nightBlend);
