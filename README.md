@@ -136,6 +136,16 @@ src/
 
 ---
 
+## 🌐 Render 원서버 배포 가이드
+
+Express가 빌드된 `dist/` 정적 파일과 `/ws` WebSocket 서버를 한 포트(`PORT`)에서 함께 서빙하므로 Render **Web Service** 1개로 바로 배포할 수 있습니다. ([render.yaml](render.yaml), [.npmrc](.npmrc) 포함)
+
+* **Build Command**: `npm install --include=dev && npm run build`
+* **Start Command**: `npm start`
+* **Health Check Path**: `/health`
+
+---
+
 ## 📚 관련 문서 (원천기술 · 기획서)
 
 - **원천기술 분석 & 인계서**: [docs/원천기술/HANDOFF.md](docs/원천기술/HANDOFF.md)
