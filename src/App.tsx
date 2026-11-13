@@ -197,7 +197,7 @@ export default function App() {
     showPolaroidAction || trainActive || carryingFirewood || nearbyPrompt !== null;
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden">
+    <div className="relative w-screen h-dvh overflow-hidden">
       <OnsenScene
         ref={sceneRef}
         coatId={coatId}
@@ -233,12 +233,12 @@ export default function App() {
       />
 
       {/* Top Floating Bar: Brand Title (Left) + Teleport Menu, Sound Mixer & Day/Night (Right) */}
-      <header className="pointer-events-none fixed inset-x-0 top-0 z-20 flex items-start justify-between gap-1.5 px-2.5 py-2.5 sm:gap-2 sm:px-6 sm:py-4">
-        <div className="pointer-events-auto flex items-center gap-1.5 min-w-0">
+      <header className="pointer-events-none fixed inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-1.5 px-2 py-2 sm:flex-nowrap sm:items-start sm:gap-2 sm:px-6 sm:py-4">
+        <div className="pointer-events-auto flex items-center gap-1 sm:gap-1.5 min-w-0">
           <div
             className={`flex items-baseline gap-2.5 rounded-xl px-2.5 py-1.5 sm:px-3.5 sm:py-2 border shrink-0 ${surfaceCls}`}
           >
-            <h1 className="text-sm sm:text-base font-semibold tracking-tight whitespace-nowrap">
+            <h1 className="text-xs sm:text-base font-semibold tracking-tight whitespace-nowrap">
               묘유원
             </h1>
             <span
@@ -387,7 +387,7 @@ export default function App() {
             ) : (
               <SlidersHorizontal className="w-3.5 h-3.5 sm:w-4 sm:h-4 opacity-85" aria-hidden="true" />
             )}
-            <span>음향</span>
+            <span className="hidden sm:inline">음향</span>
           </button>
 
           <button
@@ -403,12 +403,12 @@ export default function App() {
             {isNight ? (
               <>
                 <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#ff9e3b]" aria-hidden="true" />
-                <span>밤 온천</span>
+                <span className="hidden sm:inline">밤 온천</span>
               </>
             ) : (
               <>
                 <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#c97a28]" aria-hidden="true" />
-                <span>낮 설경</span>
+                <span className="hidden sm:inline">낮 설경</span>
               </>
             )}
           </button>
@@ -738,11 +738,11 @@ export default function App() {
       )}
 
       {/* Bottom Floating Stack: Context Status/Capture Bar + Xylophone + Action Dock + 6-Coat Switcher */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-3 sm:bottom-4 z-20 flex flex-col items-center gap-2 px-3">
+      <div className="pointer-events-none fixed inset-x-0 bottom-2 sm:bottom-4 pb-[env(safe-area-inset-bottom)] z-20 flex flex-col items-center gap-1.5 sm:gap-2 px-2 sm:px-3">
         {showContextBar && (
           <div
             data-testid="context-status-bar"
-            className={`pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-xl px-3 py-1.5 border shadow-md max-w-full ${surfaceCls}`}
+            className={`pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 rounded-xl px-2.5 py-1.5 sm:px-3 border shadow-md max-w-full ${surfaceCls}`}
           >
             {nearbyPrompt && (
               <button
@@ -750,7 +750,7 @@ export default function App() {
                 data-testid="nearby-interact-btn"
                 onClick={() => sceneRef.current?.triggerInteraction(nearbyPrompt.kind)}
                 title={nearbyPrompt.hint}
-                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer whitespace-nowrap shadow-sm transition-colors ${
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] sm:text-xs font-semibold cursor-pointer whitespace-nowrap shadow-sm transition-colors ${
                   isNight
                     ? 'bg-[#ff9e3b] text-[#1a2030] hover:bg-[#ffb15c]'
                     : 'bg-[#5c4328] text-[#fcfaf5] hover:bg-[#49341e]'
@@ -761,7 +761,7 @@ export default function App() {
                     ? `${nearbyPrompt.label} (${Math.min(kneadCount, MILK_VENDING_UNLOCK_KNEADS)}/${MILK_VENDING_UNLOCK_KNEADS})`
                     : nearbyPrompt.label}
                 </span>
-                <span className="opacity-80 text-[11px]">(F)</span>
+                <span className="hidden sm:inline opacity-80 text-[11px]">(F)</span>
               </button>
             )}
 
@@ -769,9 +769,9 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => sceneRef.current?.standUp()}
-                className="text-xs font-medium hover:underline cursor-pointer whitespace-nowrap"
+                className="text-[11px] sm:text-xs font-medium hover:underline cursor-pointer text-center sm:whitespace-nowrap"
               >
-                오목눈이와 휴식 중 · 일어나기 (ESC)
+                오목눈이와 휴식 중 · 일어나기 <span className="hidden sm:inline">(ESC)</span>
               </button>
             )}
 
@@ -779,7 +779,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleCapturePolaroid}
-                className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] cursor-pointer whitespace-nowrap"
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] sm:text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] cursor-pointer whitespace-nowrap"
               >
                 <Camera className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>📸 추억 사진 저장</span>
@@ -787,13 +787,13 @@ export default function App() {
             )}
 
             {carryingFirewood && nearbyPrompt?.kind !== 'firewood_furnace' && (
-              <span className="text-xs font-medium opacity-90 whitespace-nowrap">
+              <span className="text-[11px] sm:text-xs font-medium opacity-90 text-center sm:whitespace-nowrap">
                 🪵 장작 운반 중 · 아궁이 장작터로 가져가 불을 지펴주세요
               </span>
             )}
 
             {trainActive && (
-              <span className="text-xs font-medium opacity-90 whitespace-nowrap">
+              <span className="text-[11px] sm:text-xs font-medium opacity-90 text-center sm:whitespace-nowrap">
                 산책 동행 중 · 최대 2마리만 차분하게 따라와요
               </span>
             )}
@@ -804,14 +804,14 @@ export default function App() {
           <div
             role="group"
             aria-label="대나무 실로폰 음계"
-            className={`pointer-events-auto flex items-center gap-1 rounded-xl p-1 border shadow-md ${surfaceCls}`}
+            className={`pointer-events-auto flex items-center gap-1 rounded-xl p-1 border shadow-md overflow-x-auto max-w-full ${surfaceCls}`}
           >
             {PENTATONIC_BAMBOO_NOTES.map((note, idx) => (
               <button
                 key={note.key}
                 type="button"
                 onClick={() => sceneRef.current?.playBambooNote(idx)}
-                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium cursor-pointer transition-colors whitespace-nowrap ${
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
                   isNight
                     ? 'hover:bg-[#ff9e3b]/25 text-[#ffe6c4]'
                     : 'hover:bg-[#5c4328]/12 text-[#3c3329]'
@@ -827,13 +827,13 @@ export default function App() {
         <div
           role="group"
           aria-label="고양이 행동 선택"
-          className={`pointer-events-auto grid grid-cols-3 sm:flex items-center justify-center gap-1 rounded-2xl p-1.5 border shadow-lg max-w-full ${surfaceCls}`}
+          className={`pointer-events-auto flex items-center justify-start sm:justify-center gap-1 rounded-2xl p-1 sm:p-1.5 border shadow-lg overflow-x-auto max-w-full ${surfaceCls}`}
         >
           <button
             type="button"
             onClick={() => sceneRef.current?.triggerGreet()}
             aria-pressed={actionMode === 'greet'}
-            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
+            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
               actionMode === 'greet'
                 ? 'bg-[#d9842b] text-white'
                 : isNight
@@ -841,13 +841,13 @@ export default function App() {
                   : 'text-[#2c251d] hover:bg-black/6'
             }`}
           >
-            🐾 코 인사 (G)
+            🐾 코 인사 <span className="hidden sm:inline">(G)</span>
           </button>
           <button
             type="button"
             onClick={() => sceneRef.current?.triggerKneadOrLoaf()}
             aria-pressed={actionMode === 'knead' || actionMode === 'loaf'}
-            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
+            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
               actionMode === 'knead' || actionMode === 'loaf'
                 ? 'bg-[#d9842b] text-white'
                 : isNight
@@ -855,13 +855,13 @@ export default function App() {
                   : 'text-[#2c251d] hover:bg-black/6'
             }`}
           >
-            🍞 꾹꾹이 / 식빵 (B)
+            🍞 꾹꾹이/식빵 <span className="hidden sm:inline">(B)</span>
           </button>
           <button
             type="button"
             onClick={() => sceneRef.current?.triggerBathSoak()}
             aria-pressed={actionMode === 'soak'}
-            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
+            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
               actionMode === 'soak'
                 ? 'bg-[#d9842b] text-white'
                 : isNight
@@ -869,13 +869,13 @@ export default function App() {
                   : 'text-[#2c251d] hover:bg-black/6'
             }`}
           >
-            ♨️ 노천탕 입욕 (E)
+            ♨️ 노천탕 입욕 <span className="hidden sm:inline">(E)</span>
           </button>
           <button
             type="button"
             onClick={() => setYarnOpen((prev) => !prev)}
             aria-pressed={yarnOpen}
-            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
+            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
               yarnOpen
                 ? 'bg-[#d9842b] text-white'
                 : isNight
@@ -889,7 +889,7 @@ export default function App() {
             type="button"
             onClick={() => sceneRef.current?.toggleWalkTrain()}
             aria-pressed={trainActive}
-            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
+            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
               trainActive
                 ? 'bg-[#d9842b] text-white'
                 : isNight
@@ -897,7 +897,7 @@ export default function App() {
                   : 'text-[#2c251d] hover:bg-black/6'
             }`}
           >
-            🐈 산책 동행 (T)
+            🐈 산책 동행 <span className="hidden sm:inline">(T)</span>
           </button>
           <button
             type="button"
@@ -906,7 +906,7 @@ export default function App() {
               sceneRef.current?.playBambooNote(Math.floor(Math.random() * 5));
             }}
             aria-pressed={xylophoneOpen}
-            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
+            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
               xylophoneOpen
                 ? 'bg-[#d9842b] text-white'
                 : isNight
@@ -914,14 +914,14 @@ export default function App() {
                   : 'text-[#2c251d] hover:bg-black/6'
             }`}
           >
-            🎋 실로폰 (M)
+            🎋 실로폰 <span className="hidden sm:inline">(M)</span>
           </button>
         </div>
 
         {/* 6-Coat Switcher */}
         <nav
           aria-label="고양이 털 무늬 선택"
-          className={`pointer-events-auto grid grid-cols-3 sm:flex items-center justify-center gap-1 rounded-2xl p-1 border shadow-md max-w-full ${surfaceCls}`}
+          className={`pointer-events-auto flex items-center justify-start sm:justify-center gap-1 rounded-2xl p-1 border shadow-md overflow-x-auto max-w-full ${surfaceCls}`}
         >
           {CAT_COATS.map((coat) => {
             const active = coat.id === coatId;

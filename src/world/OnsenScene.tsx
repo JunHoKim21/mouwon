@@ -124,6 +124,13 @@ function detectSoftwareWebGL(): boolean {
   return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
 }
 
+function detectMobileDevice(): boolean {
+  if (typeof window === 'undefined') return false;
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  return coarse || /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+}
+
 function shortestAngleLerp(current: number, target: number, alpha: number): number {
   let diff = (target - current) % (Math.PI * 2);
   if (diff > Math.PI) diff -= Math.PI * 2;
@@ -270,12 +277,14 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       if (!container) return;
 
       const isSoftwareGl = detectSoftwareWebGL();
+      const isMobile = detectMobileDevice();
+      const pixelRatioCap = isSoftwareGl ? 1 : isMobile ? 1.2 : 1.75;
       const audio = new OnsenAudioEngine();
       audio.updateSettings(mixerRef.current);
       audioRef.current = audio;
 
       const renderer = new THREE.WebGLRenderer({
-        antialias: !isSoftwareGl,
+        antialias: !isSoftwareGl && !isMobile,
         powerPreference: 'high-performance',
         preserveDrawingBuffer: isSoftwareGl,
       });
@@ -283,7 +292,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.0;
       renderer.setPixelRatio(
-        isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 1.75),
+        Math.min(window.devicePixelRatio || 1, pixelRatioCap),
       );
       renderer.shadowMap.enabled = !isSoftwareGl;
       renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -342,7 +351,8 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       sunLight.target.position.set(0, 0, 8);
       scene.add(sunLight.target);
       sunLight.castShadow = !isSoftwareGl;
-      sunLight.shadow.mapSize.set(2048, 2048);
+      const shadowRes = isMobile ? 1024 : 2048;
+      sunLight.shadow.mapSize.set(shadowRes, shadowRes);
       sunLight.shadow.camera.near = 2;
       sunLight.shadow.camera.far = 120;
       sunLight.shadow.camera.left = -46;
@@ -351,10 +361,13 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       sunLight.shadow.camera.bottom = -46;
       sunLight.shadow.bias = -0.0005;
       sunLight.shadow.normalBias = 0.075;
-      sunLight.shadow.radius = 3.5;
+      sunLight.shadow.radius = isMobile ? 2.0 : 3.5;
       scene.add(sunLight);
 
-      const maxAnisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      const maxAnisotropy = Math.min(
+        isMobile ? 2 : 8,
+        renderer.capabilities.getMaxAnisotropy(),
+      );
       const textures = createProceduralTextureBundle(maxAnisotropy);
       const world = createOnsenWorld(textures, isSoftwareGl);
       world.syncWishYuzus(wishYuzusRef.current);
@@ -1271,6 +1284,9 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         const h = container.clientHeight || window.innerHeight;
         camera.aspect = w / Math.max(1, h);
         camera.updateProjectionMatrix();
+        renderer.setPixelRatio(
+          Math.min(window.devicePixelRatio || 1, pixelRatioCap),
+        );
         renderer.setSize(w, h);
         renderer.render(scene, camera);
       };

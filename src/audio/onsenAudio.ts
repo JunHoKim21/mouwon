@@ -24,9 +24,15 @@ function createPinkNoiseBuffer(
   crossfadeSamples = 2048,
 ): AudioBuffer {
   const sampleRate = ctx.sampleRate;
-  const length = Math.floor(sampleRate * durationSeconds);
+  const length = Math.max(1024, Math.floor(sampleRate * durationSeconds));
+  const fadeLen = Math.min(
+    Math.max(crossfadeSamples, Math.floor(sampleRate * 0.55)),
+    Math.floor(length / 3),
+  );
+  const totalSamples = length + fadeLen;
   const buffer = ctx.createBuffer(1, length, sampleRate);
   const data = buffer.getChannelData(0);
+  const tailOverlap = new Float32Array(fadeLen);
 
   let b0 = 0;
   let b1 = 0;
@@ -36,7 +42,7 @@ function createPinkNoiseBuffer(
   let b5 = 0;
   let b6 = 0;
 
-  for (let i = 0; i < length; i++) {
+  const nextPinkSample = (): number => {
     const white = Math.random() * 2 - 1;
     b0 = 0.99886 * b0 + white * 0.0555179;
     b1 = 0.99332 * b1 + white * 0.0750759;
@@ -46,17 +52,27 @@ function createPinkNoiseBuffer(
     b5 = -0.7616 * b5 - white * 0.016898;
     const pink = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.08;
     b6 = white * 0.115926;
-    data[i] = pink;
+    return pink;
+  };
+
+  // Warm up IIR filter state so the beginning has no DC/transient step
+  for (let i = 0; i < 1024; i++) {
+    nextPinkSample();
   }
 
-  // Seamless loop crossfade
-  const fadeLen = Math.min(crossfadeSamples, Math.floor(length / 4));
+  for (let i = 0; i < totalSamples; i++) {
+    const sample = nextPinkSample();
+    if (i < length) {
+      data[i] = sample;
+    } else {
+      tailOverlap[i - length] = sample;
+    }
+  }
+
+  // Equal-power overlap crossfade from extra tail into buffer head for seamless looping
   for (let i = 0; i < fadeLen; i++) {
-    const t = i / fadeLen;
-    const tailIdx = length - fadeLen + i;
-    const headVal = data[i];
-    const tailVal = data[tailIdx];
-    data[i] = headVal * t + tailVal * (1 - t);
+    const angle = (i / fadeLen) * (Math.PI * 0.5);
+    data[i] = data[i] * Math.sin(angle) + tailOverlap[i] * Math.cos(angle);
   }
 
   return buffer;
@@ -114,7 +130,11 @@ export class OnsenAudioEngine {
         (window as unknown as { webkitAudioContext: typeof AudioContext })
           .webkitAudioContext;
       if (!AudioCtx) return;
-      this.ctx = new AudioCtx();
+      try {
+        this.ctx = new AudioCtx({ latencyHint: 'playback' });
+      } catch {
+        this.ctx = new AudioCtx();
+      }
       this.setupGraph(this.ctx);
     }
     if (this.ctx.state === 'suspended') {
@@ -186,32 +206,48 @@ export class OnsenAudioEngine {
   }
 
   private createWinterWind(ctx: AudioContext, destination: AudioNode): void {
-    const windBuf = createPinkNoiseBuffer(ctx, 7.2, 2048);
+    const windBuf = createPinkNoiseBuffer(ctx, 8.5, 4096);
     const src = ctx.createBufferSource();
     src.buffer = windBuf;
     src.loop = true;
 
     const hpf = ctx.createBiquadFilter();
     hpf.type = 'highpass';
-    hpf.frequency.value = 240;
+    hpf.frequency.value = 180;
+    hpf.Q.value = 0.5;
 
-    const lpf = ctx.createBiquadFilter();
-    lpf.type = 'lowpass';
-    lpf.frequency.value = 880;
+    // Cascaded 24dB/oct lowpass removes harsh hiss/crackling from pink noise
+    const lpf1 = ctx.createBiquadFilter();
+    lpf1.type = 'lowpass';
+    lpf1.frequency.value = 500;
+    lpf1.Q.value = 0.55;
+
+    const lpf2 = ctx.createBiquadFilter();
+    lpf2.type = 'lowpass';
+    lpf2.frequency.value = 460;
+    lpf2.Q.value = 0.55;
 
     const windGain = ctx.createGain();
-    windGain.gain.value = 0.08;
+    windGain.gain.value = 0.065;
 
     const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
     lfo.frequency.value = 0.045;
-    const lfoDepth = ctx.createGain();
-    lfoDepth.gain.value = 0.04;
-    lfo.connect(lfoDepth);
-    lfoDepth.connect(windGain.gain);
+
+    const lfoGainDepth = ctx.createGain();
+    lfoGainDepth.gain.value = 0.025;
+    lfo.connect(lfoGainDepth);
+    lfoGainDepth.connect(windGain.gain);
+
+    const lfoFreqDepth = ctx.createGain();
+    lfoFreqDepth.gain.value = 120;
+    lfo.connect(lfoFreqDepth);
+    lfoFreqDepth.connect(lpf2.frequency);
 
     src.connect(hpf);
-    hpf.connect(lpf);
-    lpf.connect(windGain);
+    hpf.connect(lpf1);
+    lpf1.connect(lpf2);
+    lpf2.connect(windGain);
     windGain.connect(destination);
 
     src.start();
