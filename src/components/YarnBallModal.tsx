@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { RotateCcw, X } from 'lucide-react';
+import { YARN_MAX_COUNT } from '../world/ritualMath';
 
 interface YarnBallModalProps {
   isNight: boolean;
@@ -203,7 +204,7 @@ export function YarnBallModal({
     spinAccumRef.current += dist;
     while (spinAccumRef.current >= SPIN_RADIANS_PER_COUNT) {
       spinAccumRef.current -= SPIN_RADIANS_PER_COUNT;
-      if (countRef.current < 108) {
+      if (countRef.current < YARN_MAX_COUNT) {
         onIncrementRef.current();
       }
     }
@@ -213,7 +214,7 @@ export function YarnBallModal({
     ? 'bg-[#1a2030] border-white/15 text-[#f4eee3]'
     : 'bg-[#fcfaf5] border-[#2c251d]/15 text-[#2c251d]';
 
-  const pct = Math.min(100, Math.round((count / 108) * 100));
+  const pct = Math.min(100, Math.round((count / YARN_MAX_COUNT) * 100));
 
   return (
     <div
@@ -238,7 +239,7 @@ export function YarnBallModal({
         </div>
 
         <p className="text-xs opacity-75 mb-3">
-          마우스 휠을 굴리거나 털실을 드래그해 108번 포근하게 감아보세요.
+          마우스 휠을 굴리거나 털실을 드래그해 {YARN_MAX_COUNT}번 포근하게 감아보세요.
         </p>
 
         <div className="flex flex-col items-center">
@@ -279,7 +280,7 @@ export function YarnBallModal({
             <span data-testid="yarn-count-value" className="text-2xl font-bold text-[#d9842b]">
               {count}
             </span>
-            <span className="text-xs opacity-70">/ 108</span>
+            <span className="text-xs opacity-70">/ {YARN_MAX_COUNT}</span>
           </div>
 
           <div
@@ -294,8 +295,8 @@ export function YarnBallModal({
           </div>
 
           <p className="mt-2 min-h-[1.25rem] text-xs font-medium text-center opacity-85">
-            {count >= 108
-              ? '108바퀴 굴리기 완료 · 마음의 실타래가 포근히 풀렸어요.'
+            {count >= YARN_MAX_COUNT
+              ? `${YARN_MAX_COUNT}바퀴 감기 완료 · 포근한 실타래가 완성됐어요.`
               : '드래그 · 휠 스크롤로 돌돌 굴리기'}
           </p>
         </div>
@@ -317,7 +318,7 @@ export function YarnBallModal({
           <button
             type="button"
             onClick={() => addSpinDelta(45, 45)}
-            disabled={count >= 108}
+            disabled={count >= YARN_MAX_COUNT}
             className="rounded-xl px-4 py-2 text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] disabled:opacity-50 cursor-pointer"
           >
             한 바퀴 굴리기

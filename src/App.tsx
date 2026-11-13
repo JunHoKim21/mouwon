@@ -31,6 +31,7 @@ import {
   PENTATONIC_BAMBOO_NOTES,
   YUZU_WISH_COLORS,
   WishYuzuItem,
+  YARN_MAX_COUNT,
   clampWishMessage,
 } from './world/ritualMath';
 
@@ -46,7 +47,7 @@ export default function App() {
   const [trainActive, setTrainActive] = useState(false);
   const [xylophoneOpen, setXylophoneOpen] = useState(false);
 
-  // Yarn 108 Counter modal state
+  // Yarn 100 Counter modal state
   const [yarnOpen, setYarnOpen] = useState(false);
   const [yarnCount, setYarnCount] = useState(0);
 
@@ -115,7 +116,7 @@ export default function App() {
     e.preventDefault();
     const cleaned = clampWishMessage(wishText);
     if (!cleaned) {
-      setWishError('소원 문구를 한 글자 이상 입력해 주세요.');
+      setWishError('감사나 응원 문구를 한 글자 이상 입력해 주세요.');
       return;
     }
     const angle = (wishes.length * 1.9 + 0.6) % (Math.PI * 2);
@@ -286,7 +287,7 @@ export default function App() {
               setMixerOpen((prev) => !prev);
             }}
             aria-expanded={mixerOpen}
-            aria-label="사운드 믹서 열기"
+            aria-label="온천 소리 조절 열기"
             className={`flex items-center gap-1 rounded-xl px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-medium border whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d9842b] ${surfaceCls}`}
           >
             {mixer.muted ? (
@@ -323,11 +324,11 @@ export default function App() {
           {mixerOpen && (
             <div
               role="region"
-              aria-label="사운드 믹서"
+              aria-label="온천 소리 조절"
               className={`absolute right-0 top-12 w-60 rounded-2xl p-3.5 border shadow-xl ${surfaceCls}`}
             >
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-semibold">온천 사운드 믹서</span>
+                <span className="text-xs font-semibold">온천 소리 조절</span>
                 <button
                   type="button"
                   onClick={() =>
@@ -426,12 +427,12 @@ export default function App() {
           >
             <div className="flex items-center justify-between mb-3">
               <h2 id="wish-composer-title" className="text-base font-semibold">
-                소원 유자 띄우기
+                감사·응원 유자 띄우기
               </h2>
               <button
                 type="button"
                 onClick={() => setComposerOpen(false)}
-                aria-label="소원 창 닫기"
+                aria-label="유자 쪽지 창 닫기"
                 className="rounded-lg p-1.5 opacity-70 hover:opacity-100 cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -439,7 +440,7 @@ export default function App() {
             </div>
 
             <p className="text-xs opacity-75 mb-3">
-              유자 빛깔을 고르고 따뜻한 소원을 담아 연못에 띄워보세요.
+              유자 빛깔을 고르고 따뜻한 감사와 응원 쪽지를 연못에 띄워보세요.
             </p>
 
             <div className="flex items-center gap-2 mb-3.5" role="group" aria-label="유자 색상 선택">
@@ -462,7 +463,7 @@ export default function App() {
             </div>
 
             <label className="block mb-2">
-              <span className="sr-only">소원 문구</span>
+              <span className="sr-only">감사·응원 쪽지</span>
               <input
                 type="text"
                 maxLength={40}
@@ -471,7 +472,7 @@ export default function App() {
                   setWishText(e.target.value);
                   if (wishError) setWishError('');
                 }}
-                placeholder="소원 문구를 적어주세요 (최대 40자)"
+                placeholder="따뜻한 감사나 응원 한마디를 적어주세요 (최대 40자)"
                 className={`w-full rounded-xl px-3 py-2 text-sm border outline-none ${
                   isNight
                     ? 'bg-[#121622] border-white/15 text-[#f4eee3] placeholder:text-white/35'
@@ -497,18 +498,18 @@ export default function App() {
                 type="submit"
                 className="rounded-xl px-4 py-2 text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] cursor-pointer"
               >
-                소원 띄우기
+                쪽지 띄우기
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Wish Yuzu Reader Card */}
+      {/* Yuzu Note Reader Card */}
       {readingWish && (
         <div
           role="dialog"
-          aria-label="소원 유자 읽기"
+          aria-label="유자 쪽지 읽기"
           className="fixed inset-x-0 top-16 z-30 flex justify-center px-4 pointer-events-none"
         >
           <div
@@ -523,7 +524,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setReadingWish(null)}
-              aria-label="소원 읽기 닫기"
+              aria-label="쪽지 읽기 닫기"
               className="rounded-lg p-1 opacity-70 hover:opacity-100 cursor-pointer shrink-0"
             >
               <X className="w-4 h-4" />
@@ -581,14 +582,14 @@ export default function App() {
         />
       )}
 
-      {/* 108 Yarn Ball Counter Modal (strictly unmounted when closed) */}
+      {/* 100 Yarn Ball Counter Modal (strictly unmounted when closed) */}
       {yarnOpen && (
         <YarnBallModal
           isNight={isNight}
           count={yarnCount}
           onIncrement={() => {
             setYarnCount((prev) => {
-              const next = Math.min(108, prev + 1);
+              const next = Math.min(YARN_MAX_COUNT, prev + 1);
               sceneRef.current?.playYarnTick(next);
               return next;
             });
@@ -598,21 +599,21 @@ export default function App() {
         />
       )}
 
-      {/* Polaroid Photo Preview Modal (strictly unmounted when closed) */}
+      {/* Memory Photo Preview Modal (strictly unmounted when closed) */}
       {polaroidUrl && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="폴라로이드 사진 미리보기"
+          aria-label="추억 사진 미리보기"
           className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-4"
         >
           <div className={`w-full max-w-xs rounded-2xl p-4 border shadow-2xl ${surfaceCls}`}>
             <div className="flex items-center justify-between mb-2.5">
-              <h2 className="text-sm font-semibold">폴라로이드 추억 저장</h2>
+              <h2 className="text-sm font-semibold">추억 사진 저장</h2>
               <button
                 type="button"
                 onClick={() => setPolaroidUrl(null)}
-                aria-label="폴라로이드 창 닫기"
+                aria-label="추억 사진 창 닫기"
                 className="rounded-lg p-1 opacity-70 hover:opacity-100 cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -620,7 +621,7 @@ export default function App() {
             </div>
             <img
               src={polaroidUrl}
-              alt="묘유원 폴라로이드 스냅샷"
+              alt="묘유원 추억 사진"
               className="w-full rounded-lg border border-black/10 shadow-sm"
             />
             <div className="mt-3 flex items-center justify-end gap-2">
@@ -637,7 +638,7 @@ export default function App() {
                 className="flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>PNG 저장</span>
+                <span>사진 파일 저장</span>
               </button>
             </div>
           </div>
@@ -689,7 +690,7 @@ export default function App() {
                 className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] cursor-pointer whitespace-nowrap"
               >
                 <Camera className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>📸 폴라로이드 저장</span>
+                <span>📸 추억 사진 저장</span>
               </button>
             )}
 
@@ -701,7 +702,7 @@ export default function App() {
 
             {trainActive && (
               <span className="text-xs font-medium opacity-90 whitespace-nowrap">
-                산책 대열 합류 중 · 이동 시 고양이들이 따라와요
+                산책 동행 중 · 최대 2마리만 차분하게 따라와요
               </span>
             )}
           </div>
@@ -804,7 +805,7 @@ export default function App() {
                   : 'text-[#2c251d] hover:bg-black/6'
             }`}
           >
-            🐈 산책 대열 (T)
+            🐈 산책 동행 (T)
           </button>
           <button
             type="button"

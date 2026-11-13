@@ -25,9 +25,15 @@ export interface NpcCatRuntimeState {
   moveSpeed: number;
 }
 
-export const TRAIN_FOLLOW_SPACING = 1.25;
+export const TRAIN_FOLLOW_SPACING = 1.45;
 export const TRAIN_MIN_SEPARATION = 0.95;
 export const TRAIN_MOVE_SPEED = 3.6;
+export const DEFAULT_MAX_TRAIN_FOLLOWERS = 2;
+
+export interface StepNpcCatsOptions {
+  /** Caps how many cats leave their spots to follow a single player to avoid visual clutter. */
+  maxFollowers?: number;
+}
 
 /**
  * 7 distinct NPC cats placed with >= 1.8m spacing so none ever overlap:
@@ -247,17 +253,22 @@ export function stepNpcCats(
   trainActive: boolean,
   dt: number,
   heightAt: (x: number, z: number) => number,
+  options: StepNpcCatsOptions = {},
 ): void {
   const safeDt = Math.min(Math.max(dt, 0.001), 0.08);
   const turnAlpha = 1 - Math.exp(-safeDt * 11);
   const yAlpha = 1 - Math.exp(-safeDt * 12);
+  const maxFollowers = Math.max(0, options.maxFollowers ?? cats.length);
 
   let prevLeaderX = player.x;
   let prevLeaderZ = player.z;
   let prevLeaderHeading = player.heading;
+  let activeFollowers = 0;
 
   for (const cat of cats) {
-    if (trainActive && cat.spec.joinsTrain) {
+    const canJoin = trainActive && cat.spec.joinsTrain && activeFollowers < maxFollowers;
+    if (canJoin) {
+      activeFollowers += 1;
       const desiredX = prevLeaderX - Math.sin(prevLeaderHeading) * TRAIN_FOLLOW_SPACING;
       const desiredZ = prevLeaderZ - Math.cos(prevLeaderHeading) * TRAIN_FOLLOW_SPACING;
 
@@ -348,9 +359,9 @@ export function stepNpcCats(
     }
   }
 
-  // Pairwise anti-overlap separation among train followers & player
-  if (trainActive) {
-    const trainCats = cats.filter((c) => c.spec.joinsTrain);
+  // Pairwise anti-overlap separation among active train followers & player
+  if (trainActive && maxFollowers > 0) {
+    const trainCats = cats.filter((c) => c.spec.joinsTrain).slice(0, maxFollowers);
     for (let i = 0; i < trainCats.length; i++) {
       const a = trainCats[i];
       const pdx = a.x - player.x;

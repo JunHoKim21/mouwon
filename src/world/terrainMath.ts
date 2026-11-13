@@ -94,7 +94,7 @@ export const TELEPORT_SPOTS: readonly TeleportSpot[] = [
   },
   {
     zoneId: 'main_bath',
-    label: '노천 히노끼탕',
+    label: '노천 편백탕',
     x: 0,
     z: 5.0,
     heading: Math.PI,
@@ -102,7 +102,7 @@ export const TELEPORT_SPOTS: readonly TeleportSpot[] = [
   },
   {
     zoneId: 'tatami_hall',
-    label: '묘연각 난로방',
+    label: '고양이 난로방',
     x: 0,
     z: -10.5,
     heading: 0,
@@ -110,7 +110,7 @@ export const TELEPORT_SPOTS: readonly TeleportSpot[] = [
   },
   {
     zoneId: 'yuzu_pond',
-    label: '소원 유자탕',
+    label: '따뜻한 유자 연못',
     x: -12.3,
     z: 9.6,
     heading: -Math.PI / 2,
@@ -126,7 +126,7 @@ export const TELEPORT_SPOTS: readonly TeleportSpot[] = [
   },
   {
     zoneId: 'bamboo_shishi',
-    label: '대나무 숲 시시오도시',
+    label: '대나무 숲 물통',
     x: -20.2,
     z: 30.8,
     heading: -0.65,

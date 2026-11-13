@@ -197,7 +197,7 @@ export function MilkVendingModal({
             }`}
           >
             <Gift className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>주변 NPC 고양이에게 {selectedDrink.label} 선물하기</span>
+            <span>주변 고양이에게 {selectedDrink.label} 선물하기</span>
           </button>
         </div>
       </div>

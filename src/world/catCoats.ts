@@ -83,7 +83,7 @@ export const CAT_COATS: readonly CatCoatDefinition[] = [
   },
   {
     id: 'creamsicle',
-    name: '크림시클',
+    name: '크림냥',
     primaryColor: '#f3dfc1',
     secondaryColor: '#faf3e8',
     accentColor: '#dfb886',

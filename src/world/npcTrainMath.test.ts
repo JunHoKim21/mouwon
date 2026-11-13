@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  DEFAULT_MAX_TRAIN_FOLLOWERS,
   NPC_CAT_SPECS,
   NpcCatRuntimeState,
   TRAIN_MIN_SEPARATION,
@@ -133,5 +134,39 @@ test('Bath-soaking train cats exit cleanly through the south stairs even when pl
     haru.z > 7.5,
     `npc-haru should exit bath via south stairs instead of getting stuck (z=${haru.z.toFixed(2)})`,
   );
+});
+
+test('maxFollowers caps companion walk followers at DEFAULT_MAX_TRAIN_FOLLOWERS (2) and keeps soaking cats in bath', () => {
+  assert.equal(DEFAULT_MAX_TRAIN_FOLLOWERS, 2);
+  const cats: NpcCatRuntimeState[] = NPC_CAT_SPECS.map((spec) => ({
+    spec,
+    x: spec.homeX,
+    y: groundHeightAt(spec.homeX, spec.homeZ),
+    z: spec.homeZ,
+    heading: spec.homeHeading,
+    actionMode: spec.homeAction,
+    moveSpeed: 0,
+  }));
+
+  const player = { x: 8.5, z: 16.0, heading: Math.PI * 0.5 };
+  for (let step = 0; step < 120; step++) {
+    player.x += Math.sin(player.heading) * 0.03;
+    player.z += Math.cos(player.heading) * 0.03;
+    stepNpcCats(cats, player, true, 0.05, groundHeightAt, {
+      maxFollowers: DEFAULT_MAX_TRAIN_FOLLOWERS,
+    });
+  }
+
+  const tux = cats.find((c) => c.spec.id === 'npc-tux')!;
+  const dangam = cats.find((c) => c.spec.id === 'npc-dangam')!;
+  const mikan = cats.find((c) => c.spec.id === 'npc-mikan')!;
+  const haru = cats.find((c) => c.spec.id === 'npc-haru')!;
+  const cream = cats.find((c) => c.spec.id === 'npc-cream')!;
+
+  assert.ok(Math.hypot(tux.x - player.x, tux.z - player.z) < 4.5);
+  assert.ok(Math.hypot(dangam.x - player.x, dangam.z - player.z) < 5.5);
+  assert.equal(mikan.actionMode, 'soak');
+  assert.equal(haru.actionMode, 'soak');
+  assert.equal(cream.actionMode, 'loaf');
 });
 

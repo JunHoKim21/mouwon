@@ -5,6 +5,7 @@ import { AudioMixerSettings, OnsenAudioEngine } from '../audio/onsenAudio';
 import { CatCoatId, getCatCoatById } from './catCoats';
 import { createCatAvatar, CatAvatarController } from './catAvatar';
 import {
+  DEFAULT_MAX_TRAIN_FOLLOWERS,
   NPC_CAT_SPECS,
   NpcCatRuntimeState,
   stepNpcCats,
@@ -800,7 +801,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           const coatName = getCatCoatById(coatRef.current).name;
           const modeCaption =
             actionMode === 'soak'
-              ? '노천 히노끼탕 유자 입욕'
+              ? '노천 편백탕 유자 입욕'
               : actionMode === 'sitBench'
                 ? '오목눈이와 원목 평상 휴식'
                 : '묘유원의 따뜻한 한때';
@@ -1271,13 +1272,14 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           carryingFirewood,
         );
 
-        // Step 7 NPC cats (soaking/loafing or following behind player in walk train)
+        // Step 7 NPC cats (soaking/loafing or calm companion stroll behind player)
         stepNpcCats(
           npcStates,
           { x: playerPos.x, z: playerPos.z, heading: playerHeading },
           trainActiveRef.current,
           dt,
           groundHeightAt,
+          { maxFollowers: DEFAULT_MAX_TRAIN_FOLLOWERS },
         );
         for (let i = 0; i < npcEntries.length; i++) {
           const entry = npcEntries[i];

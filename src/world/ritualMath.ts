@@ -44,7 +44,7 @@ export const INITIAL_WISH_YUZUS: readonly WishYuzuItem[] = [
   {
     id: 'seed-1',
     colorHex: '#f4be2b',
-    message: '올겨울 몸도 마음도 42도로 포근하길',
+    message: '오늘도 수고한 당신에게 따뜻한 쉼과 평안이 있기를',
     localX: -1.1,
     localZ: 0.7,
     phase: 0.4,
@@ -52,7 +52,7 @@ export const INITIAL_WISH_YUZUS: readonly WishYuzuItem[] = [
   {
     id: 'seed-2',
     colorHex: '#94c456',
-    message: '지친 하루 끝에 조용한 쉼이 닿기를',
+    message: '작은 일에도 감사하며 포근한 하루 보내세요',
     localX: 1.35,
     localZ: -0.6,
     phase: 2.1,
@@ -60,7 +60,7 @@ export const INITIAL_WISH_YUZUS: readonly WishYuzuItem[] = [
   {
     id: 'seed-3',
     colorHex: '#f28b30',
-    message: '우리 집 고양이 건강하고 오래오래 행복하자',
+    message: '함께 쉬어가는 모든 이웃에게 따뜻한 온기를 나눠요',
     localX: 0.25,
     localZ: 1.45,
     phase: 4.0,
@@ -76,6 +76,7 @@ export const PENTATONIC_BAMBOO_NOTES = [
   { key: '5', label: '라', freq: 880.0 },
 ] as const;
 
+export const YARN_MAX_COUNT = 100;
 export const MILK_VENDING_UNLOCK_KNEADS = 25;
 
 export interface MilkDrinkOption {
@@ -110,8 +111,8 @@ export const MILK_DRINK_OPTIONS: readonly MilkDrinkOption[] = [
   },
   {
     id: 'matatabi',
-    label: '마따따비 차',
-    desc: '개다래 잎을 우린 고양이 특선 힐링 허브차',
+    label: '녹차우유',
+    desc: '은은하고 달콤쌉싸름한 따뜻한 녹차 병우유',
     bottleColor: '#a8cf97',
     capColor: '#4c753d',
   },
@@ -290,7 +291,7 @@ const INTERACT_SPOT_DESCRIPTORS: readonly InteractSpotDescriptor[] = [
     x: LANDMARKS.bambooShishi.x + 1.5,
     z: LANDMARKS.bambooShishi.z - 1.5,
     maxDist: 4.2,
-    label: '🎋 시시오도시 울리기',
+    label: '🎋 대나무 물통 울리기',
     hint: 'F 또는 클릭 · 맑은 대나무 물소리',
   },
   {
@@ -298,8 +299,8 @@ const INTERACT_SPOT_DESCRIPTORS: readonly InteractSpotDescriptor[] = [
     x: LANDMARKS.yuzuPond.x,
     z: LANDMARKS.yuzuPond.z,
     maxDist: 6.5,
-    label: '🍊 소원 유자 띄우기',
-    hint: 'F 또는 클릭 · 소원 카드 띄우기',
+    label: '🍊 감사·응원 유자 띄우기',
+    hint: 'F 또는 클릭 · 따뜻한 쪽지 띄우기',
   },
   {
     kind: 'egg_basket',

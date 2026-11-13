@@ -1,6 +1,7 @@
 import {
   FootstepSurface,
   PENTATONIC_BAMBOO_NOTES,
+  YARN_MAX_COUNT,
 } from '../world/ritualMath';
 
 export interface AudioMixerSettings {
@@ -578,7 +579,7 @@ export class OnsenAudioEngine {
     if (!this.ctx || !this.sfxBus || this.settings.muted) return;
     const ctx = this.ctx;
     const now = ctx.currentTime;
-    const isComplete = count >= 108;
+    const isComplete = count >= YARN_MAX_COUNT;
     const freq = isComplete
       ? 783.99
       : PENTATONIC_BAMBOO_NOTES[count % PENTATONIC_BAMBOO_NOTES.length].freq;

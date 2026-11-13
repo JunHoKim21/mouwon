@@ -6,6 +6,7 @@ import {
   MILK_DRINK_OPTIONS,
   MILK_VENDING_UNLOCK_KNEADS,
   PENTATONIC_BAMBOO_NOTES,
+  YARN_MAX_COUNT,
   YUZU_WISH_COLORS,
   clampWishMessage,
   computePurrProximity,
@@ -63,8 +64,9 @@ test('detectFootstepSurface distinguishes snow, wood, and water across landmarks
   assert.equal(detectFootstepSurface(0, 25), 'snow'); // Snowy courtyard path
 });
 
-test('milk vending constants define 25 knead threshold and 4 warm drinks', () => {
+test('milk vending & yarn constants define 25 kneads, 4 warm drinks, and 100 yarn max', () => {
   assert.equal(MILK_VENDING_UNLOCK_KNEADS, 25);
+  assert.equal(YARN_MAX_COUNT, 100);
   assert.equal(MILK_DRINK_OPTIONS.length, 4);
   assert.deepEqual(
     MILK_DRINK_OPTIONS.map((d) => d.id),
@@ -98,16 +100,14 @@ test('findNearbyInteractPrompt guides firewood 2-step flow and landmark interact
   );
 
   const bambooArrival = TELEPORT_SPOTS.find((s) => s.zoneId === 'bamboo_shishi')!;
-  assert.equal(
-    findNearbyInteractPrompt(bambooArrival.x, bambooArrival.z, false, 'idle')?.kind,
-    'shishi_odoshi',
-  );
+  const bambooPrompt = findNearbyInteractPrompt(bambooArrival.x, bambooArrival.z, false, 'idle');
+  assert.equal(bambooPrompt?.kind, 'shishi_odoshi');
+  assert.equal(bambooPrompt?.label, '🎋 대나무 물통 울리기');
 
   const yuzuArrival = TELEPORT_SPOTS.find((s) => s.zoneId === 'yuzu_pond')!;
-  assert.equal(
-    findNearbyInteractPrompt(yuzuArrival.x, yuzuArrival.z, false, 'idle')?.kind,
-    'yuzu_pond',
-  );
+  const yuzuPrompt = findNearbyInteractPrompt(yuzuArrival.x, yuzuArrival.z, false, 'idle');
+  assert.equal(yuzuPrompt?.kind, 'yuzu_pond');
+  assert.equal(yuzuPrompt?.label, '🍊 감사·응원 유자 띄우기');
 
   assert.equal(
     findNearbyInteractPrompt(ACTION_SPOTS.eggBasketSpot.x, ACTION_SPOTS.eggBasketSpot.z, false, 'idle')?.kind,
