@@ -8,14 +8,21 @@ import {
   Camera,
   ChevronDown,
   Download,
+  Eye,
+  EyeOff,
   MapPin,
   Moon,
   SlidersHorizontal,
   Sun,
+  Users,
   Volume2,
   VolumeX,
   X,
 } from 'lucide-react';
+import {
+  MultiplayerRoomStatus,
+  ROOM_MAX_PLAYERS,
+} from './shared/multiplayerProtocol';
 import { AudioMixerSettings, DEFAULT_MIXER_SETTINGS } from './audio/onsenAudio';
 import { MilkVendingModal } from './components/MilkVendingModal';
 import { YarnBallModal } from './components/YarnBallModal';
@@ -56,6 +63,15 @@ export default function App() {
   const [kneadCount, setKneadCount] = useState(0);
   const [carryingFirewood, setCarryingFirewood] = useState(false);
   const [nearbyPrompt, setNearbyPrompt] = useState<NearbyInteractPrompt | null>(null);
+  const [hideRemoteCats, setHideRemoteCats] = useState(false);
+  const [roomStatus, setRoomStatus] = useState<MultiplayerRoomStatus>({
+    state: 'offline',
+    roomId: null,
+    roomNumber: null,
+    peerCount: 1,
+    maxPeers: ROOM_MAX_PLAYERS,
+    selfId: null,
+  });
 
   // Non-blocking toast feedback banner
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -130,10 +146,24 @@ export default function App() {
       phase: wishes.length * 1.1,
     };
     setWishes((prev) => [...prev, newWish]);
+    sceneRef.current?.broadcastWish(newWish);
     setWishText('');
     setWishError('');
     setComposerOpen(false);
     setReadingWish(newWish);
+  };
+
+  const handleRoomSnapshotWishes = (snapshotWishes: WishYuzuItem[]) => {
+    if (snapshotWishes.length > 0) {
+      setWishes(snapshotWishes);
+    }
+  };
+
+  const handleRemoteWishReceived = (wish: WishYuzuItem) => {
+    setWishes((prev) => {
+      if (prev.some((item) => item.id === wish.id)) return prev;
+      return [...prev, wish].slice(-30);
+    });
   };
 
   const handleSelectWish = (wishId: string) => {
@@ -175,6 +205,7 @@ export default function App() {
         wishYuzus={wishes}
         mixerSettings={mixer}
         trainActive={trainActive}
+        hideRemoteCats={hideRemoteCats}
         onActionModeChange={setActionMode}
         onZoneChange={setCurrentZone}
         onWalkingTargetChange={setWalkingTargetLabel}
@@ -196,23 +227,84 @@ export default function App() {
         onShowToast={showToast}
         onToggleXylophone={() => setXylophoneOpen((prev) => !prev)}
         onToggleYarnModal={() => setYarnOpen((prev) => !prev)}
+        onMultiplayerStatusChange={setRoomStatus}
+        onRoomSnapshotWishes={handleRoomSnapshotWishes}
+        onRemoteWishReceived={handleRemoteWishReceived}
       />
 
       {/* Top Floating Bar: Brand Title (Left) + Teleport Menu, Sound Mixer & Day/Night (Right) */}
       <header className="pointer-events-none fixed inset-x-0 top-0 z-20 flex items-start justify-between gap-1.5 px-2.5 py-2.5 sm:gap-2 sm:px-6 sm:py-4">
-        <div
-          className={`pointer-events-auto flex items-baseline gap-2.5 rounded-xl px-2.5 py-1.5 sm:px-3.5 sm:py-2 border shrink-0 ${surfaceCls}`}
-        >
-          <h1 className="text-sm sm:text-base font-semibold tracking-tight whitespace-nowrap">
-            묘유원
-          </h1>
-          <span
-            className={`hidden sm:inline text-xs whitespace-nowrap ${
-              isNight ? 'text-[#d8cbb6]/75' : 'text-[#5a4e40]/75'
-            }`}
+        <div className="pointer-events-auto flex items-center gap-1.5 min-w-0">
+          <div
+            className={`flex items-baseline gap-2.5 rounded-xl px-2.5 py-1.5 sm:px-3.5 sm:py-2 border shrink-0 ${surfaceCls}`}
           >
-            고양이 온천 여관
-          </span>
+            <h1 className="text-sm sm:text-base font-semibold tracking-tight whitespace-nowrap">
+              묘유원
+            </h1>
+            <span
+              className={`hidden sm:inline text-xs whitespace-nowrap ${
+                isNight ? 'text-[#d8cbb6]/75' : 'text-[#5a4e40]/75'
+              }`}
+            >
+              고양이 온천 여관
+            </span>
+          </div>
+
+          <div
+            data-testid="room-status-badge"
+            title={
+              roomStatus.state === 'connected'
+                ? `실시간 온천 방 ${roomStatus.roomNumber ?? 1}번 (${roomStatus.peerCount}/${roomStatus.maxPeers}명)`
+                : '서버 미연결 (혼자서도 모든 온천 기능을 이용할 수 있어요)'
+            }
+            className={`flex items-center gap-1.5 rounded-xl px-2 py-1.5 sm:px-2.5 sm:py-2 text-[11px] sm:text-xs font-medium border whitespace-nowrap shrink-0 ${surfaceCls}`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                roomStatus.state === 'connected'
+                  ? 'bg-emerald-500'
+                  : roomStatus.state === 'connecting'
+                    ? 'bg-amber-400 animate-pulse'
+                    : isNight
+                      ? 'bg-[#d8cbb6]/45'
+                      : 'bg-[#5a4e40]/40'
+              }`}
+              aria-hidden="true"
+            />
+            <Users className="w-3.5 h-3.5 opacity-80 shrink-0 hidden sm:inline" aria-hidden="true" />
+            <span>
+              {roomStatus.state === 'connected'
+                ? `${roomStatus.roomNumber ?? 1}번 방 · ${roomStatus.peerCount}/${roomStatus.maxPeers}`
+                : roomStatus.state === 'connecting'
+                  ? '연결 중'
+                  : '오프라인'}
+            </span>
+          </div>
+
+          {roomStatus.state === 'connected' && (
+            <button
+              type="button"
+              onClick={() => setHideRemoteCats((prev) => !prev)}
+              aria-pressed={hideRemoteCats}
+              title={
+                hideRemoteCats
+                  ? '다른 고양이 다시 보이기'
+                  : '다른 고양이 숨기고 혼자 보기'
+              }
+              className={`flex items-center gap-1 rounded-xl px-2 py-1.5 sm:px-2.5 sm:py-2 text-[11px] sm:text-xs font-medium border whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d9842b] ${
+                hideRemoteCats
+                  ? 'bg-[#d9842b] text-white border-[#d9842b]'
+                  : surfaceCls
+              }`}
+            >
+              {hideRemoteCats ? (
+                <EyeOff className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              ) : (
+                <Eye className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              )}
+              <span className="hidden md:inline">혼자 보기</span>
+            </button>
+          )}
         </div>
 
         <div className="pointer-events-auto relative flex items-center gap-1 sm:gap-2">

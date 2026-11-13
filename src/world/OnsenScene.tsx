@@ -2,14 +2,28 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { AudioMixerSettings, OnsenAudioEngine } from '../audio/onsenAudio';
+import {
+  REMOTE_PEER_STALE_MS,
+  type ClientPlayerPayload,
+  type MultiplayerRoomStatus,
+} from '../shared/multiplayerProtocol';
 import { CatCoatId, getCatCoatById } from './catCoats';
 import { createCatAvatar, CatAvatarController } from './catAvatar';
+import { OnsenMultiplayerClient } from './multiplayerClient';
 import {
   DEFAULT_MAX_TRAIN_FOLLOWERS,
   NPC_CAT_SPECS,
   NpcCatRuntimeState,
   stepNpcCats,
 } from './npcTrainMath';
+import {
+  RemoteCatSimState,
+  applyRemotePeerUpdate,
+  collectStaleRemoteIds,
+  createRemoteCatSimState,
+  findNearestMilkRecipient,
+  stepRemoteCatSim,
+} from './remoteCatsMath';
 import { createOnsenWorld, OnsenWorldController } from './onsenWorld';
 import { createProceduralTextureBundle } from './proceduralTextures';
 import {
@@ -57,6 +71,7 @@ export interface OnsenSceneHandle {
   capturePolaroid: () => string | null;
   standUp: () => void;
   triggerInteraction: (kind: NearbyInteractKind) => void;
+  broadcastWish: (wish: WishYuzuItem) => void;
 }
 
 interface OnsenSceneProps {
@@ -65,6 +80,7 @@ interface OnsenSceneProps {
   wishYuzus: readonly WishYuzuItem[];
   mixerSettings: AudioMixerSettings;
   trainActive: boolean;
+  hideRemoteCats?: boolean;
   onActionModeChange?: (mode: CatActionMode) => void;
   onZoneChange?: (zone: WorldZoneId) => void;
   onWalkingTargetChange?: (label: string | null) => void;
@@ -78,6 +94,9 @@ interface OnsenSceneProps {
   onShowToast?: (message: string) => void;
   onToggleXylophone?: () => void;
   onToggleYarnModal?: () => void;
+  onMultiplayerStatusChange?: (status: MultiplayerRoomStatus) => void;
+  onRoomSnapshotWishes?: (wishes: WishYuzuItem[]) => void;
+  onRemoteWishReceived?: (wish: WishYuzuItem) => void;
 }
 
 const DAY_HEMI_SKY = new THREE.Color('#e4eef5');
@@ -120,6 +139,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       wishYuzus,
       mixerSettings,
       trainActive,
+      hideRemoteCats = false,
       onActionModeChange,
       onZoneChange,
       onWalkingTargetChange,
@@ -133,6 +153,9 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       onShowToast,
       onToggleXylophone,
       onToggleYarnModal,
+      onMultiplayerStatusChange,
+      onRoomSnapshotWishes,
+      onRemoteWishReceived,
     },
     ref,
   ) {
@@ -142,6 +165,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
     const wishYuzusRef = useRef<readonly WishYuzuItem[]>(wishYuzus);
     const mixerRef = useRef<AudioMixerSettings>(mixerSettings);
     const trainActiveRef = useRef<boolean>(trainActive);
+    const hideRemoteCatsRef = useRef<boolean>(hideRemoteCats);
 
     const onActionModeChangeRef = useRef(onActionModeChange);
     const onZoneChangeRef = useRef(onZoneChange);
@@ -156,6 +180,9 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
     const onShowToastRef = useRef(onShowToast);
     const onToggleXylophoneRef = useRef(onToggleXylophone);
     const onToggleYarnModalRef = useRef(onToggleYarnModal);
+    const onMultiplayerStatusChangeRef = useRef(onMultiplayerStatusChange);
+    const onRoomSnapshotWishesRef = useRef(onRoomSnapshotWishes);
+    const onRemoteWishReceivedRef = useRef(onRemoteWishReceived);
     onActionModeChangeRef.current = onActionModeChange;
     onZoneChangeRef.current = onZoneChange;
     onWalkingTargetChangeRef.current = onWalkingTargetChange;
@@ -169,12 +196,17 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
     onShowToastRef.current = onShowToast;
     onToggleXylophoneRef.current = onToggleXylophone;
     onToggleYarnModalRef.current = onToggleYarnModal;
+    onMultiplayerStatusChangeRef.current = onMultiplayerStatusChange;
+    onRoomSnapshotWishesRef.current = onRoomSnapshotWishes;
+    onRemoteWishReceivedRef.current = onRemoteWishReceived;
 
     const avatarRef = useRef<CatAvatarController | null>(null);
     const worldRef = useRef<OnsenWorldController | null>(null);
     const audioRef = useRef<OnsenAudioEngine | null>(null);
     const forceTickRef = useRef<(() => void) | null>(null);
     const actionApiRef = useRef<OnsenSceneHandle | null>(null);
+    const syncRemoteVisibilityRef = useRef<((hidden: boolean) => void) | null>(null);
+    const multiplayerRef = useRef<OnsenMultiplayerClient | null>(null);
 
     useImperativeHandle(ref, () => ({
       triggerGreet: () => actionApiRef.current?.triggerGreet(),
@@ -193,7 +225,15 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       standUp: () => actionApiRef.current?.standUp(),
       triggerInteraction: (kind: NearbyInteractKind) =>
         actionApiRef.current?.triggerInteraction(kind),
+      broadcastWish: (wish: WishYuzuItem) =>
+        multiplayerRef.current?.sendWishAdd(wish),
     }));
+
+    useEffect(() => {
+      hideRemoteCatsRef.current = hideRemoteCats;
+      syncRemoteVisibilityRef.current?.(hideRemoteCats);
+      forceTickRef.current?.();
+    }, [hideRemoteCats]);
 
     useEffect(() => {
       coatRef.current = coatId;
@@ -411,6 +451,139 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         }
       };
 
+      const remoteEntries = new Map<
+        string,
+        { sim: RemoteCatSimState; avatar: CatAvatarController }
+      >();
+      let syncedServerFireCount = 0;
+
+      const clearRemoteEntries = () => {
+        for (const entry of remoteEntries.values()) {
+          scene.remove(entry.avatar.root);
+          entry.avatar.dispose();
+        }
+        remoteEntries.clear();
+      };
+
+      const upsertRemoteEntry = (peer: Parameters<typeof applyRemotePeerUpdate>[1], nowMs: number) => {
+        const existing = remoteEntries.get(peer.id);
+        if (existing) {
+          const { coatChanged } = applyRemotePeerUpdate(existing.sim, peer, nowMs);
+          if (coatChanged) {
+            existing.avatar.setCoat(existing.sim.coatId);
+          }
+          existing.avatar.root.visible = !hideRemoteCatsRef.current;
+          return;
+        }
+        const sim = createRemoteCatSimState(peer, nowMs);
+        const remoteAvatar = createCatAvatar(
+          sim.coatId,
+          textures.contactShadowMap,
+          maxAnisotropy,
+        );
+        remoteAvatar.root.name = `RemoteCat-${peer.id}`;
+        remoteAvatar.root.position.set(sim.x, sim.y, sim.z);
+        remoteAvatar.root.rotation.y = sim.heading;
+        remoteAvatar.root.visible = !hideRemoteCatsRef.current;
+        scene.add(remoteAvatar.root);
+        remoteEntries.set(peer.id, { sim, avatar: remoteAvatar });
+      };
+
+      const removeRemoteEntry = (peerId: string) => {
+        const entry = remoteEntries.get(peerId);
+        if (!entry) return;
+        scene.remove(entry.avatar.root);
+        entry.avatar.dispose();
+        remoteEntries.delete(peerId);
+      };
+
+      syncRemoteVisibilityRef.current = (hidden: boolean) => {
+        for (const entry of remoteEntries.values()) {
+          entry.avatar.root.visible = !hidden;
+        }
+      };
+
+      const getPlayerPayload = (currentSpeed = 0): ClientPlayerPayload => ({
+        coatId: coatRef.current,
+        x: playerPos.x,
+        y: playerPos.y,
+        z: playerPos.z,
+        heading: playerHeading,
+        actionMode,
+        moveSpeed: currentSpeed,
+        hasHeadYuzu,
+        carryingFirewood,
+      });
+
+      const multiplayer = new OnsenMultiplayerClient({
+        getInitialState: () => getPlayerPayload(0),
+        onStatusChange: (status) => {
+          container.dataset.room = status.roomId ?? 'offline';
+          container.dataset.peers = String(status.peerCount);
+          onMultiplayerStatusChangeRef.current?.(status);
+        },
+        onRoomSnapshot: (snapshot) => {
+          clearRemoteEntries();
+          const nowMs = Date.now();
+          for (const peer of snapshot.peers) {
+            upsertRemoteEntry(peer, nowMs);
+          }
+          onRoomSnapshotWishesRef.current?.(snapshot.wishes);
+          const targetLogs = Math.min(8, snapshot.fireCount);
+          while (syncedServerFireCount < targetLogs) {
+            world.stokeFirewood();
+            syncedServerFireCount += 1;
+          }
+          forceTickRef.current?.();
+        },
+        onPeerUpdate: (peer) => {
+          upsertRemoteEntry(peer, Date.now());
+          forceTickRef.current?.();
+        },
+        onPeerLeave: (peerId) => {
+          removeRemoteEntry(peerId);
+          forceTickRef.current?.();
+        },
+        onRemoteWishAdd: (wish) => {
+          onRemoteWishReceivedRef.current?.(wish);
+          onShowToastRef.current?.('다른 고양이가 연못에 감사·응원 유자를 띄웠어요 🍊');
+        },
+        onRemoteFireStoke: (_fromPeerId, fireCount) => {
+          world.stokeFirewood();
+          syncedServerFireCount = Math.max(
+            syncedServerFireCount,
+            Math.min(8, fireCount),
+          );
+          audio.playFireStoke();
+          onShowToastRef.current?.('다른 고양이가 아궁이에 장작을 넣었어요 🔥');
+          forceTickRef.current?.();
+        },
+        onRemoteBambooRing: () => {
+          world.triggerShishiOdoshi();
+          audio.playShishiOdoshi();
+          forceTickRef.current?.();
+        },
+        onRemoteMilkGift: (_fromPeerId, targetPeerId) => {
+          const selfId = multiplayer.getStatus().selfId;
+          if (!targetPeerId || targetPeerId === selfId) {
+            avatar.triggerGiftAfterglow();
+            audio.playGiftChime();
+            onShowToastRef.current?.(
+              '다른 고양이에게서 따뜻한 우유 선물을 받았어요 🥛✨',
+            );
+          } else {
+            const targetEntry = remoteEntries.get(targetPeerId);
+            if (targetEntry && !hideRemoteCatsRef.current) {
+              targetEntry.avatar.triggerGiftAfterglow();
+              audio.playGiftChime();
+            }
+          }
+          forceTickRef.current?.();
+        },
+      });
+      multiplayerRef.current = multiplayer;
+      multiplayer.start();
+
       avatar.root.position.set(playerPos.x, playerPos.y, playerPos.z);
       avatar.root.rotation.y = playerHeading;
 
@@ -514,6 +687,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         setActionMode('idle');
         world.stokeFirewood();
         audio.playFireStoke();
+        multiplayer.sendFireStoke();
         onShowToastRef.current?.('온천 온도 +1°C (42°C 유지!)');
         forceTickRef.current?.();
       };
@@ -690,27 +864,43 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           audio.playVendingDrop();
         },
         giftMilkToNearestNpc: (_drinkLabel: string) => {
-          if (npcEntries.length === 0) return null;
-          let closest = npcEntries[0];
-          let minDist = Math.hypot(
-            closest.state.x - playerPos.x,
-            closest.state.z - playerPos.z,
+          const visibleRemotes = hideRemoteCatsRef.current
+            ? []
+            : Array.from(remoteEntries.values()).map((entry) => ({
+                id: entry.sim.id,
+                x: entry.sim.x,
+                z: entry.sim.z,
+              }));
+          const npcCandidates = npcEntries.map((entry) => ({
+            id: entry.state.spec.id,
+            x: entry.state.x,
+            z: entry.state.z,
+          }));
+          const winner = findNearestMilkRecipient(
+            playerPos.x,
+            playerPos.z,
+            npcCandidates,
+            visibleRemotes,
+            60,
           );
-          for (let i = 1; i < npcEntries.length; i++) {
-            const entry = npcEntries[i];
-            const d = Math.hypot(
-              entry.state.x - playerPos.x,
-              entry.state.z - playerPos.z,
-            );
-            if (d < minDist) {
-              minDist = d;
-              closest = entry;
-            }
+          if (!winner) return null;
+
+          if (winner.kind === 'remote') {
+            const target = remoteEntries.get(winner.id);
+            if (!target) return null;
+            target.avatar.triggerGiftAfterglow();
+            audio.playGiftChime();
+            multiplayer.sendMilkGift(winner.id);
+            forceTickRef.current?.();
+            return '함께 온 고양이 친구';
           }
-          closest.avatar.triggerGiftAfterglow();
+
+          const npc = npcEntries.find((e) => e.state.spec.id === winner.id);
+          if (!npc) return null;
+          npc.avatar.triggerGiftAfterglow();
           audio.playGiftChime();
           forceTickRef.current?.();
-          return closest.state.spec.name;
+          return npc.state.spec.name;
         },
         toggleWalkTrain: () => {
           audio.unlock();
@@ -828,6 +1018,9 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           audio.unlock();
           executeInteractType(kind);
         },
+        broadcastWish: (wish: WishYuzuItem) => {
+          multiplayer.sendWishAdd(wish);
+        },
       };
 
       function executeInteractType(
@@ -846,6 +1039,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         if (kind === 'shishi_odoshi') {
           world.triggerShishiOdoshi();
           audio.playShishiOdoshi();
+          multiplayer.sendBambooRing();
           forceTickRef.current?.();
           return true;
         }
@@ -1297,6 +1491,35 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           );
         }
 
+        // Step connected multiplayer cat avatars & sync own state (~10Hz throttled)
+        const nowEpoch = Date.now();
+        if (remoteEntries.size > 0) {
+          const staleIds = collectStaleRemoteIds(
+            Array.from(remoteEntries.values(), (entry) => entry.sim),
+            nowEpoch,
+            REMOTE_PEER_STALE_MS * 2,
+          );
+          for (const staleId of staleIds) {
+            removeRemoteEntry(staleId);
+          }
+          for (const entry of remoteEntries.values()) {
+            const renderedSpeed = stepRemoteCatSim(entry.sim, dt);
+            entry.avatar.root.visible = !hideRemoteCatsRef.current;
+            entry.avatar.root.position.set(entry.sim.x, entry.sim.y, entry.sim.z);
+            entry.avatar.root.rotation.y = entry.sim.heading;
+            entry.avatar.update(
+              dt,
+              renderedSpeed,
+              entry.sim.actionMode,
+              entry.sim.actionTime,
+              entry.sim.hasHeadYuzu,
+              undefined,
+              entry.sim.carryingFirewood,
+            );
+          }
+        }
+        multiplayer.sendState(getPlayerPayload(moveSpeed), nowEpoch);
+
         const zoneNow = detectZone(playerPos.x, playerPos.z);
         if (container.dataset.zone !== zoneNow) {
           container.dataset.zone = zoneNow;
@@ -1433,6 +1656,10 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         for (const npc of npcEntries) {
           npc.avatar.dispose();
         }
+        multiplayerRef.current = null;
+        syncRemoteVisibilityRef.current = null;
+        multiplayer.dispose();
+        clearRemoteEntries();
         world.dispose();
         textures.dispose();
         envTarget.dispose();
