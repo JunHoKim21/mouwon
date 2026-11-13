@@ -335,7 +335,7 @@ export default function App() {
               <div
                 role="menu"
                 aria-label="장소 걸어가기 메뉴"
-                className={`absolute right-0 top-11 sm:top-12 w-56 max-h-[65vh] overflow-y-auto rounded-2xl p-1.5 border shadow-xl z-30 ${surfaceCls}`}
+                className={`absolute left-0 sm:left-auto sm:right-0 top-11 sm:top-12 w-56 max-h-[65vh] overflow-y-auto rounded-2xl p-1.5 border shadow-xl z-30 ${surfaceCls}`}
               >
                 <div className="px-2.5 py-1.5 text-[11px] font-semibold opacity-70">
                   📍 장소 걸어가기
@@ -417,7 +417,7 @@ export default function App() {
             <div
               role="region"
               aria-label="온천 소리 조절"
-              className={`absolute right-0 top-12 w-60 rounded-2xl p-3.5 border shadow-xl ${surfaceCls}`}
+              className={`absolute left-0 sm:left-auto sm:right-0 top-11 sm:top-12 w-60 rounded-2xl p-3.5 border shadow-xl z-30 ${surfaceCls}`}
             >
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-semibold">온천 소리 조절</span>
