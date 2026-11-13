@@ -1,20 +1,117 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# 🐾 고양이 온천 여관 : 묘유원(猫湯院)
 
-# Run and deploy your AI Studio app
+> 눈 덮인 삼나무 숲속 노천탕에서 고양이가 되어 쉬어가는 **3D 프로시저럴 힐링 온천 웹 월드**
 
-This contains everything you need to run your app locally.
+외부 3D 모델이나 오디오 파일 없이 **Three.js 프로시저럴 지오메트리·Canvas2D 절차적 텍스처·Web Audio API 합성 사운드**만으로 구현된 인터랙티브 웹 애플리케이션입니다.
 
-View your app in AI Studio: https://ai.studio/apps/35b90d1f-2f85-48e7-bfc6-4da7d5478815
+---
 
-## Run Locally
+## 📖 사용법
 
-**Prerequisites:**  Node.js
+### 1. 로컬 실행 방법
 
+```bash
+# 1) 의존성 설치 (vite@8 / esbuild@0.25 peerOptional 충돌 방지를 위해 --legacy-peer-deps 권장)
+npm install --legacy-peer-deps
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+# 2) 개발 서버 실행 -> http://localhost:3000 접속
+npm run dev
+```
+
+| 명령어 | 설명 |
+| :--- | :--- |
+| `npm run dev` | Vite 개발 서버 실행 (`http://localhost:3000/`) |
+| `npm run build` | 프로덕션 번들 빌드 (`dist/`) |
+| `npm run lint` | TypeScript 타입 체크 (`tsc --noEmit`) |
+| `npx tsx --test src/world/*.test.ts` | 길찾기·지형 충돌·NPC 대열·상호작용 단위 테스트 실행 |
+
+> 필요 시 [.env.example](.env.example)을 참고해 환경 변수를 설정할 수 있습니다. (현재 3D 월드 체험에는 별도 API 키 없이 바로 동작합니다.)
+
+---
+
+### 2. 기본 조작 & 단축키
+
+| 입력 | 동작 |
+| :--- | :--- |
+| **`W` `A` `S` `D` / `방향키`** | 카메라 시점 기준 자유 이동 |
+| **바닥 · 다리 · 마루 클릭** | A\* 경로 탐색 기반 자동 도보 이동 (상단 배너 클릭 또는 `ESC`로 중단) |
+| **마우스 드래그 / 휠** | 카메라 회전 및 줌 인/아웃 |
+| **오브젝트 클릭 또는 `F`** | 근처 상호작용 오브젝트 실행 (하단 안내 버튼 클릭도 가능) |
+| **`G`** | 🐾 코 인사 |
+| **`B`** | 🍞 꾹꾹이 (누적 횟수 증가) → 식빵 굽기 자세 전환 |
+| **`E`** | ♨️ 노천탕 입욕 (수건·머리 위 유자 연출) |
+| **`T`** | 🐈 산책 대열 합류/해제 (여관 NPC 고양이들이 뒤따라 이동) |
+| **`M` / 숫자 `1`~`5`** | 🎋 대나무 실로폰(C 메이저 5음계: 도·레·미·솔·라) 패널 토글 및 연주 |
+| **`ESC`** | 자동 이동 멈추기 / 평상·휴식 자세에서 일어나기 |
+
+---
+
+### 3. 여관 스팟 & 주요 기능
+
+1. **📍 장소 걸어가기 (우측 상단 드롭다운)**
+   - **8개 주요 명소**(온천 입구 다리, 노천 히노끼탕, 묘연각 난로방, 소원 유자탕, 우유 자판기 & 평상, 대나무 숲 시시오도시, 아궁이 장작터, 족욕 개울)로 장애물과 계단을 우회해 걸어갑니다.
+2. **🍊 소원 유자탕**
+   - 연못을 클릭하거나 근처에서 `F`를 눌러 5가지 색상의 유자에 최대 40자 소원을 띄우고, 떠 있는 유자를 눌러 메시지를 읽을 수 있습니다.
+3. **🥛 우유 자판기 & 원목 평상**
+   - 평상에 앉아 쉬면 오목눈이(뱁새)가 날아와 곁에 앉습니다.
+   - `B` 키 또는 버튼으로 **꾹꾹이 25회**를 채우면 자판기에서 따뜻한 음료 4종(바나나우유, 딸기우유, 흰우유, 마따따비 차)을 뽑아 마시거나 NPC 고양이에게 선물할 수 있습니다.
+4. **🪵 아궁이 장작터 (2단계)**
+   - ① 장작 더미에서 장작 1개비 집기(`F`/클릭) → ② 아궁이에 장작 넣기(`F`/클릭)로 불꽃과 온천 김이 강해집니다.
+5. **🎋 대나무 숲 시시오도시 & 🥚 온천 달걀**
+   - 대나무 시시오도시를 클릭해 맑은 대나무 물통 소리를 울리거나, 원천 바구니에 온천 달걀을 담가 반숙 체험을 할 수 있습니다.
+6. **🧶 털실 굴리기 108 카운터 · 📸 폴라로이드 · 🎚️ 사운드 믹서 · 🌙 낮/밤 전환**
+   - 털실을 드래그/스크롤해 최대 108바퀴를 굴릴 수 있고, 입욕·평상 휴식 중에는 폴라로이드 PNG 스냅샷 저장 버튼이 활성화됩니다.
+   - 우측 상단 메뉴에서 **환경음·골골송·효과음 볼륨/음소거** 조절과 **낮 설경 ↔ 밤 온천** 전환, 하단 도크에서 **고양이 털 무늬 6종**(치즈태비, 삼색이, 턱시도, 고등어태비, 깜장이, 크림시클) 변경이 가능합니다.
+
+---
+
+## 🛠️ 사용 기술 (Tech Stack)
+
+| 영역 | 기술 / 라이브러리 | 활용 내용 |
+| :--- | :--- | :--- |
+| **UI & 프레임워크** | React 19, TypeScript, Tailwind CSS v4 | HUD, 장소 이동 메뉴, 모달(유자 소원·자판기·털실·폴라로이드), 반응형 레이아웃 |
+| **3D 엔진 & 렌더링** | Three.js (`^0.187.0`), `RoomEnvironment`, `PCFShadowMap` | 프로시저럴 3D 고양이/NPC 아바타, 눈 덮인 산·온천 건축물, 셰이더 물결, 낮/밤 라이팅·안개 전환, 눈·김 파티클 |
+| **절차적 텍스처** | HTML5 Canvas2D (`CanvasTexture`) | 히노끼 목재·돌·다다미·창호지·대나무·고양이 무늬·표지판/수건 텍스처 실시간 생성 |
+| **경로 탐색 & 물리** | 커스텀 2D 그리드 A\* (`pathfinding.ts`), 충돌 해석 (`terrainMath.ts`) | 온천 턱·바위 링·난로방 벽면 우회 및 계단/툇마루 게이트 기반 자동 도보 경로 산출, 지형 높이 보간, 3인칭 댐핑 카메라 |
+| **절차적 오디오** | Web Audio API (`onsenAudio.ts`) | 핑크 노이즈 온천 물소리·바람, 거리/행동 비례 공간 골골송, 5음계 대나무 실로폰·시시오도시·발소리·효과음 합성 |
+| **아이콘 & 모션** | Lucide React, Motion | UI 아이콘 및 모달/컴포넌트 인터랙션 |
+| **빌드 & 테스트** | Vite 8.3, `@vitejs/plugin-react`, `tsx`, Node `node:test` | 개발/번들 빌드 및 수학·길찾기·대열·상호작용 단위 테스트 |
+
+---
+
+## 📂 주요 디렉터리 구조
+
+```text
+docs/
+├── 원천기술/
+│   └── HANDOFF.md                # 레퍼런스 역공학 기술 스펙(카메라·셰이더·Web Audio) 및 개발 교훈
+└── 기획서/
+    ├── cat_onsen_master_plan.md  # 『고양이 온천 여관 : 묘유원(猫湯院)』 마스터 기획서
+    └── camp_bonfire_master_plan.md # 『카피바라 & 리트리버 모닥불 야영장 : 유유원(悠悠院)』 기획서
+
+src/
+├── App.tsx                       # 상단 바, 장소 이동 메뉴, 근접 액션 바, 모달 UI
+├── audio/
+│   └── onsenAudio.ts             # Web Audio API 기반 환경음·골골송·효과음 합성 엔진
+├── components/
+│   ├── MilkVendingModal.tsx      # 25회 꾹꾹이 해금 우유 자판기 모달
+│   └── YarnBallModal.tsx         # 108바퀴 털실 굴리기 캔버스 모달
+└── world/
+    ├── OnsenScene.tsx            # Three.js 씬 루프, 입력/호버 레이캐스트, 카메라 제어
+    ├── onsenWorld.ts             # 온천 여관 3D 월드, 표지판, 바닥 안내 링, 파티클/조명
+    ├── catAvatar.ts              # 3D 고양이 모델링 및 걷기·꾹꾹이·입욕·운반 애니메이션
+    ├── catCoats.ts               # 6종 고양이 털 무늬 정의
+    ├── pathfinding.ts            # 장애물 회피 및 계단 게이트 기반 그리드 A* 길찾기
+    ├── terrainMath.ts            # 지형 높이, 충돌 콜라이더, 구역 판별, 카메라 리그 수학
+    ├── ritualMath.ts             # 근접 상호작용 판별, 소리 감쇠, 유자/자판기 상수
+    ├── npcTrainMath.ts           # NPC 고양이 산책 대열 추종 및 복귀 로직
+    └── proceduralTextures.ts     # Canvas2D 절차적 텍스처 생성기
+```
+
+---
+
+## 📚 관련 문서 (원천기술 · 기획서)
+
+- **원천기술 분석 & 인계서**: [docs/원천기술/HANDOFF.md](docs/원천기술/HANDOFF.md)
+- **묘유원 마스터 기획서**: [docs/기획서/cat_onsen_master_plan.md](docs/기획서/cat_onsen_master_plan.md)
+- **유유원(모닥불 야영장) 기획서**: [docs/기획서/camp_bonfire_master_plan.md](docs/기획서/camp_bonfire_master_plan.md)
