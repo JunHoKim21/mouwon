@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #bccad1;
+    font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.is-active {
+  background-color: #d9842b;
+  color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 198, 122, 0.55);
+}
+
