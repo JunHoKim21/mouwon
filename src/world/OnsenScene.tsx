@@ -648,6 +648,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       let dragDistance = 0;
       let lastPointerX = 0;
       let lastPointerY = 0;
+      let lastPointerType = 'mouse'; // 'mouse' | 'touch' | 'pen'
 
       const raycaster = new THREE.Raycaster();
       const pointerNdc = new THREE.Vector2();
@@ -1197,6 +1198,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         dragDistance = 0;
         lastPointerX = e.clientX;
         lastPointerY = e.clientY;
+        lastPointerType = e.pointerType; // 'touch' | 'mouse' | 'pen'
       };
 
       const onPointerMove = (e: PointerEvent) => {
@@ -1220,14 +1222,18 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           canvas.style.cursor = 'grabbing';
         }
 
-        cameraYaw -= dx * CAMERA_DEFAULTS.yawSensitivity;
+        const sensMultiplier = lastPointerType === 'touch'
+          ? CAMERA_DEFAULTS.mobileSensitivityMultiplier
+          : 1.0;
+        const effectiveSens = CAMERA_DEFAULTS.yawSensitivity * sensMultiplier;
+        cameraYaw -= dx * effectiveSens;
         cameraPitch = Math.max(
           CAMERA_DEFAULTS.minPitch,
           Math.min(
             CAMERA_DEFAULTS.maxPitch,
             cameraPitch +
               dy *
-                CAMERA_DEFAULTS.yawSensitivity *
+                effectiveSens *
                 CAMERA_DEFAULTS.pitchSensitivityRatio,
           ),
         );

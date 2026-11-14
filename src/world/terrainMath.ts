@@ -580,6 +580,8 @@ export const CAMERA_DEFAULTS = {
   dampingRate: 6.5,
   yawSensitivity: 0.0034,
   pitchSensitivityRatio: 0.65,
+  /** 모바일 손가락 드래그 감도 배율 — PC 마우스 대비 delta가 작아서 보정 */
+  mobileSensitivityMultiplier: 25,
   minPitch: -0.24,
   maxPitch: 0.34,
 } as const;
