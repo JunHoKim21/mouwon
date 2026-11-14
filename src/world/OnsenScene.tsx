@@ -393,6 +393,11 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         const startY = groundHeightAt(spec.homeX, spec.homeZ);
         npcAvatar.root.position.set(spec.homeX, startY, spec.homeZ);
         npcAvatar.root.rotation.y = spec.homeHeading;
+        npcAvatar.root.userData = { isNpcCat: true, npcId: spec.id };
+        npcAvatar.root.traverse((obj) => {
+          obj.userData.isNpcCat = true;
+          obj.userData.npcId = spec.id;
+        });
         scene.add(npcAvatar.root);
         const state: NpcCatRuntimeState = {
           spec,
@@ -406,6 +411,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         return { avatar: npcAvatar, state };
       });
       const npcStates = npcEntries.map((e) => e.state);
+      const npcRoots = npcEntries.map((e) => e.avatar.root);
 
       // Player & Action State
       const playerPos = {
@@ -431,6 +437,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         | 'pickup_firewood'
         | 'stoke_firewood'
         | 'egg_ritual'
+        | 'greet'
         | 'loaf'
         | 'idle'
         | null = null;
@@ -742,6 +749,8 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         } else if (arrival === 'egg_ritual') {
           setActionMode(carryingFirewood ? 'carrying' : 'idle');
           performEggRitual();
+        } else if (arrival === 'greet') {
+          triggerGreetAction();
         } else {
           setActionMode(
             isInsideMainBath(playerPos.x, playerPos.z)
@@ -805,14 +814,16 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           | 'sitBench'
           | 'pickup_firewood'
           | 'stoke_firewood'
-          | 'egg_ritual',
+          | 'egg_ritual'
+          | 'greet',
         headingOnArrival?: number,
       ) => {
         const dist = Math.hypot(destX - playerPos.x, destZ - playerPos.z);
         const immediateRadius =
           arrivalAction === 'pickup_firewood' ||
           arrivalAction === 'stoke_firewood' ||
-          arrivalAction === 'egg_ritual'
+          arrivalAction === 'egg_ritual' ||
+          arrivalAction === 'greet'
             ? 0.65
             : 0.35;
         if (dist <= immediateRadius) {
@@ -830,13 +841,61 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         });
       };
 
+      let greetNpcTimeoutId: number | null = null;
+
+      const triggerGreetAction = () => {
+        audio.unlock();
+        clearWalkJourney();
+        setActionMode('greet');
+        audio.playMeow();
+
+        // 3.2m 반경 내 가장 가까운 NPC 고양이 친구 탐색
+        let closestNpc: (typeof npcEntries)[0] | null = null;
+        let minNpcDist = 3.2;
+
+        for (const entry of npcEntries) {
+          const dist = Math.hypot(entry.state.x - playerPos.x, entry.state.z - playerPos.z);
+          if (dist < minNpcDist) {
+            minNpcDist = dist;
+            closestNpc = entry;
+          }
+        }
+
+        if (closestNpc) {
+          // 플레이어와 NPC가 서로 마주보도록 정렬
+          playerHeading = Math.atan2(
+            closestNpc.state.x - playerPos.x,
+            closestNpc.state.z - playerPos.z,
+          );
+
+          // NPC 고양이 반응 (2.4초 지속: 몸 흔들기, 귀 쫑긋, 꼬리 흔들기)
+          closestNpc.state.greetReactionTimer = 2.4;
+          closestNpc.state.greetTargetHeading = Math.atan2(
+            playerPos.x - closestNpc.state.x,
+            playerPos.z - closestNpc.state.z,
+          );
+          closestNpc.avatar.triggerGiftAfterglow();
+
+          // NPC 고양이가 다정하게 대답 야옹(1.2배 피치) 소리를 냄
+          if (greetNpcTimeoutId !== null) window.clearTimeout(greetNpcTimeoutId);
+          greetNpcTimeoutId = window.setTimeout(() => {
+            audio.playMeow(1.2);
+            greetNpcTimeoutId = null;
+          }, 280);
+
+          onShowToastRef.current?.(
+            `${closestNpc.state.spec.name}(이)가 코를 콩 맞대며 반갑게 인사해요! 🐾💕`,
+          );
+        } else {
+          onShowToastRef.current?.('코를 쫑긋거리며 주변 친구들에게 반갑게 코인사해요 🐾');
+        }
+
+        forceTickRef.current?.();
+      };
+
       actionApiRef.current = {
         triggerGreet: () => {
-          audio.unlock();
-          clearWalkJourney();
-          setActionMode('greet');
-          audio.playMeow();
-          forceTickRef.current?.();
+          triggerGreetAction();
         },
         triggerKneadOrLoaf: () => {
           audio.unlock();
@@ -1118,8 +1177,11 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(pointerNdc, camera);
         const interactHits = raycaster.intersectObjects(world.interactables, false);
+        const npcHits = raycaster.intersectObjects(npcRoots, true);
+        const isHoverNpc = npcHits.length > 0;
         hoveredInteractType =
-          (interactHits[0]?.object.userData?.interactType as string | undefined) ?? null;
+          (interactHits[0]?.object.userData?.interactType as string | undefined) ??
+          (isHoverNpc ? 'npc_cat' : null);
         canvas.style.cursor = hoveredInteractType ? 'pointer' : 'grab';
       };
 
@@ -1264,6 +1326,37 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
             const kind = hitObj.userData?.interactType as string | undefined;
             const wishId = hitObj.userData?.wishId ? String(hitObj.userData.wishId) : undefined;
             if (executeInteractType(kind, interactHits[0].point, wishId)) {
+              return;
+            }
+          }
+
+          // 1b. Check direct click on NPC Cat Friends -> walk over & do 코인사!
+          const npcHits = raycaster.intersectObjects(npcRoots, true);
+          if (npcHits.length > 0) {
+            let hitObj: THREE.Object3D | null = npcHits[0].object;
+            let targetNpcId: string | undefined;
+            while (hitObj && !targetNpcId) {
+              if (hitObj.userData?.npcId) {
+                targetNpcId = hitObj.userData.npcId as string;
+              }
+              hitObj = hitObj.parent;
+            }
+            const hitNpc = npcEntries.find((e) => e.state.spec.id === targetNpcId);
+            if (hitNpc) {
+              const dist = Math.hypot(hitNpc.state.x - playerPos.x, hitNpc.state.z - playerPos.z);
+              if (dist <= 3.2) {
+                triggerGreetAction();
+              } else {
+                const angle = Math.atan2(playerPos.x - hitNpc.state.x, playerPos.z - hitNpc.state.z);
+                const stopX = hitNpc.state.x + Math.sin(angle) * 1.35;
+                const stopZ = hitNpc.state.z + Math.cos(angle) * 1.35;
+                moveOrSettleTo(
+                  stopX,
+                  stopZ,
+                  'greet',
+                  Math.atan2(hitNpc.state.x - stopX, hitNpc.state.z - stopZ),
+                );
+              }
               return;
             }
           }
@@ -1503,7 +1596,8 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           const s = entry.state;
           entry.avatar.root.position.set(s.x, s.y, s.z);
           entry.avatar.root.rotation.y = s.heading;
-          const showRestingProps = s.actionMode === 'soak' || s.actionMode === 'loaf';
+          const showRestingProps =
+            s.actionMode === 'soak' || s.actionMode === 'loaf' || s.actionMode === 'greet';
           entry.avatar.update(
             dt,
             s.moveSpeed,
@@ -1677,6 +1771,11 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         window.removeEventListener('pointerup', onPointerUp);
         canvas.removeEventListener('wheel', onWheel);
         canvas.removeEventListener('webglcontextlost', onContextLost);
+
+        if (greetNpcTimeoutId !== null) {
+          window.clearTimeout(greetNpcTimeoutId);
+          greetNpcTimeoutId = null;
+        }
 
         audio.dispose();
         avatar.dispose();

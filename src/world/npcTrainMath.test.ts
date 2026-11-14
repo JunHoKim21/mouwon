@@ -170,3 +170,40 @@ test('maxFollowers caps companion walk followers at DEFAULT_MAX_TRAIN_FOLLOWERS 
   assert.equal(cream.actionMode, 'loaf');
 });
 
+test('NPC cat reacts to nose greeting (greetReactionTimer) by facing player and entering greet actionMode', () => {
+  const cats: NpcCatRuntimeState[] = NPC_CAT_SPECS.map((spec) => ({
+    spec,
+    x: spec.homeX,
+    y: groundHeightAt(spec.homeX, spec.homeZ),
+    z: spec.homeZ,
+    heading: spec.homeHeading,
+    actionMode: spec.homeAction,
+    moveSpeed: 0,
+  }));
+
+  const mikan = cats.find((c) => c.spec.id === 'npc-mikan')!;
+  const player = { x: mikan.x + 1.2, z: mikan.z + 0.4, heading: 0 };
+  const targetHeading = Math.atan2(player.x - mikan.x, player.z - mikan.z);
+
+  // Trigger nose greeting reaction
+  mikan.greetReactionTimer = 2.0;
+  mikan.greetTargetHeading = targetHeading;
+
+  stepNpcCats(cats, player, false, 0.05, groundHeightAt);
+
+  assert.equal(mikan.actionMode, 'greet');
+  assert.equal(mikan.moveSpeed, 0);
+  assert.ok((mikan.greetReactionTimer ?? 0) < 2.0);
+  // Heading smoothly turned toward target
+  assert.ok(Math.abs(mikan.heading - targetHeading) < Math.abs(mikan.spec.homeHeading - targetHeading) + 0.01);
+
+  // Advance time past reaction timer (2.0s / 0.05s = 40 steps)
+  for (let step = 0; step < 45; step++) {
+    stepNpcCats(cats, player, false, 0.05, groundHeightAt);
+  }
+
+  assert.equal(mikan.greetReactionTimer, 0);
+  // Returns to home soak state
+  assert.equal(mikan.actionMode, 'soak');
+});
+

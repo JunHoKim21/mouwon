@@ -396,22 +396,23 @@ export class OnsenAudioEngine {
     this.purrSpatialGain?.gain.setTargetAtTime(0.05 + purrProximity * 0.55, now, 0.18);
   }
 
-  public playMeow(): void {
+  public playMeow(pitchMultiplier = 1.0): void {
     this.unlock();
     if (!this.ctx || !this.sfxBus || this.settings.muted) return;
     const ctx = this.ctx;
     const now = ctx.currentTime;
+    const pitch = Math.max(0.5, Math.min(2.0, pitchMultiplier));
 
     const osc = ctx.createOscillator();
     osc.type = 'triangle';
-    osc.frequency.setValueAtTime(590, now);
-    osc.frequency.exponentialRampToValueAtTime(840, now + 0.09);
-    osc.frequency.exponentialRampToValueAtTime(510, now + 0.31);
+    osc.frequency.setValueAtTime(590 * pitch, now);
+    osc.frequency.exponentialRampToValueAtTime(840 * pitch, now + 0.09);
+    osc.frequency.exponentialRampToValueAtTime(510 * pitch, now + 0.31);
 
     const formant = ctx.createBiquadFilter();
     formant.type = 'bandpass';
-    formant.frequency.setValueAtTime(1150, now);
-    formant.frequency.exponentialRampToValueAtTime(1450, now + 0.1);
+    formant.frequency.setValueAtTime(1150 * pitch, now);
+    formant.frequency.exponentialRampToValueAtTime(1450 * pitch, now + 0.1);
     formant.Q.value = 2.2;
 
     const env = ctx.createGain();

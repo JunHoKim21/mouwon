@@ -23,6 +23,10 @@ export interface NpcCatRuntimeState {
   heading: number;
   actionMode: CatActionMode;
   moveSpeed: number;
+  /** 코인사 반응 잔여 시간 (초) */
+  greetReactionTimer?: number;
+  /** 코인사 반응 시 바라볼 플레이어 각도 */
+  greetTargetHeading?: number;
 }
 
 export const TRAIN_FOLLOW_SPACING = 1.45;
@@ -267,6 +271,25 @@ export function stepNpcCats(
 
   for (const cat of cats) {
     const canJoin = trainActive && cat.spec.joinsTrain && activeFollowers < maxFollowers;
+
+    // 코인사(Nose greeting) 반응 중인 경우: 플레이어를 바라보며 코인사 모션 수행
+    if ((cat.greetReactionTimer ?? 0) > 0) {
+      cat.greetReactionTimer = Math.max(0, (cat.greetReactionTimer ?? 0) - safeDt);
+      if (cat.greetTargetHeading !== undefined) {
+        cat.heading += shortestAngleDelta(cat.heading, cat.greetTargetHeading) * turnAlpha;
+      }
+      cat.moveSpeed = 0;
+      cat.actionMode = 'greet';
+
+      if (canJoin) {
+        activeFollowers += 1;
+        prevLeaderX = cat.x;
+        prevLeaderZ = cat.z;
+        prevLeaderHeading = cat.heading;
+      }
+      continue;
+    }
+
     if (canJoin) {
       activeFollowers += 1;
       const desiredX = prevLeaderX - Math.sin(prevLeaderHeading) * TRAIN_FOLLOW_SPACING;
