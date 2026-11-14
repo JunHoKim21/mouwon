@@ -8,7 +8,8 @@ import {
   type RemotePeerState,
   type ServerToClientMessage,
 } from '../shared/multiplayerProtocol.ts';
-import type { WishYuzuItem } from './ritualMath.ts';
+import type { CatCoatId } from './catCoats.ts';
+import type { MilkDrinkId, WishYuzuItem } from './ritualMath.ts';
 
 const KEEPALIVE_STATE_INTERVAL_MS = 5000;
 const RECONNECT_BASE_MS = 1800;
@@ -29,6 +30,27 @@ export interface MultiplayerClientCallbacks {
   onRemoteFireStoke: (fromPeerId: string, fireCount: number) => void;
   onRemoteBambooRing: (fromPeerId: string) => void;
   onRemoteMilkGift: (fromPeerId: string, targetPeerId?: string) => void;
+  onRemoteMilkOffer?: (
+    fromPeerId: string,
+    fromCoatId: CatCoatId,
+    drinkId: MilkDrinkId,
+  ) => void;
+  onRemoteMilkRespond?: (
+    fromPeerId: string,
+    fromCoatId: CatCoatId,
+    drinkId: MilkDrinkId,
+    accepted: boolean,
+  ) => void;
+  onRemoteMilkRequest?: (
+    fromPeerId: string,
+    fromCoatId: CatCoatId,
+    drinkId: MilkDrinkId,
+  ) => void;
+  onRemoteMilkRequestDecline?: (
+    fromPeerId: string,
+    fromCoatId: CatCoatId,
+    drinkId: MilkDrinkId,
+  ) => void;
 }
 
 export function resolveWebSocketUrl(): string | null {
@@ -45,6 +67,7 @@ function statesEqual(a: ClientPlayerPayload, b: ClientPlayerPayload): boolean {
     a.actionMode === b.actionMode &&
     a.hasHeadYuzu === b.hasHeadYuzu &&
     a.carryingFirewood === b.carryingFirewood &&
+    (a.heldMilkId ?? null) === (b.heldMilkId ?? null) &&
     Math.abs(a.x - b.x) < 0.015 &&
     Math.abs(a.y - b.y) < 0.015 &&
     Math.abs(a.z - b.z) < 0.015 &&
@@ -244,6 +267,59 @@ export class OnsenMultiplayerClient {
         }
         break;
       }
+      case 'milk_offer': {
+        if (
+          message.fromPeerId !== this.status.selfId &&
+          message.targetPeerId === this.status.selfId
+        ) {
+          this.callbacks.onRemoteMilkOffer?.(
+            message.fromPeerId,
+            message.fromCoatId,
+            message.drinkId,
+          );
+        }
+        break;
+      }
+      case 'milk_respond': {
+        if (
+          message.fromPeerId !== this.status.selfId &&
+          message.toPeerId === this.status.selfId
+        ) {
+          this.callbacks.onRemoteMilkRespond?.(
+            message.fromPeerId,
+            message.fromCoatId,
+            message.drinkId,
+            message.accepted,
+          );
+        }
+        break;
+      }
+      case 'milk_request': {
+        if (
+          message.fromPeerId !== this.status.selfId &&
+          message.targetPeerId === this.status.selfId
+        ) {
+          this.callbacks.onRemoteMilkRequest?.(
+            message.fromPeerId,
+            message.fromCoatId,
+            message.drinkId,
+          );
+        }
+        break;
+      }
+      case 'milk_request_decline': {
+        if (
+          message.fromPeerId !== this.status.selfId &&
+          message.toPeerId === this.status.selfId
+        ) {
+          this.callbacks.onRemoteMilkRequestDecline?.(
+            message.fromPeerId,
+            message.fromCoatId,
+            message.drinkId,
+          );
+        }
+        break;
+      }
     }
   }
 
@@ -284,6 +360,29 @@ export class OnsenMultiplayerClient {
 
   public sendMilkGift(targetPeerId?: string): void {
     this.sendRaw({ type: 'milk_gift', targetPeerId });
+  }
+
+  public sendMilkOffer(targetPeerId: string, drinkId: MilkDrinkId): void {
+    this.sendRaw({ type: 'milk_offer', targetPeerId, drinkId });
+  }
+
+  public sendMilkRespond(
+    toPeerId: string,
+    drinkId: MilkDrinkId,
+    accepted: boolean,
+  ): void {
+    this.sendRaw({ type: 'milk_respond', toPeerId, drinkId, accepted });
+  }
+
+  public sendMilkRequest(targetPeerId: string, drinkId: MilkDrinkId): void {
+    this.sendRaw({ type: 'milk_request', targetPeerId, drinkId });
+  }
+
+  public sendMilkRequestDecline(
+    toPeerId: string,
+    drinkId: MilkDrinkId,
+  ): void {
+    this.sendRaw({ type: 'milk_request_decline', toPeerId, drinkId });
   }
 
   public dispose(): void {

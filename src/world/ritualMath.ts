@@ -1,21 +1,28 @@
 import {
+  CEDAR_TREES,
+  FOOTBATH_WATERWHEEL_POS,
   FOOT_STREAM_STEPSTONES,
   LANDMARKS,
+  distToWalkway,
   footStreamCenterZ,
   groundHeightAt,
+  isOnBoardwalkWalkway,
+  isOnFootbathDeck,
 } from './terrainMath';
 
 export type CatActionMode =
   | 'idle'
   | 'walk'
   | 'greet'
+  | 'groom'
   | 'knead'
   | 'loaf'
   | 'soak'
   | 'sitBench'
+  | 'footSoak'
   | 'carrying';
 
-export type FootstepSurface = 'snow' | 'wood' | 'water';
+export type FootstepSurface = 'snow' | 'wood' | 'stone' | 'water';
 
 export interface WishYuzuColor {
   id: string;
@@ -79,6 +86,8 @@ export const PENTATONIC_BAMBOO_NOTES = [
 export const YARN_MAX_COUNT = 100;
 export const MILK_VENDING_UNLOCK_KNEADS = 25;
 
+export type MilkDrinkId = MilkDrinkOption['id'];
+
 export interface MilkDrinkOption {
   id: 'banana' | 'strawberry' | 'white' | 'matatabi';
   label: string;
@@ -118,23 +127,92 @@ export const MILK_DRINK_OPTIONS: readonly MilkDrinkOption[] = [
   },
 ] as const;
 
+export function getMilkDrinkById(
+  id: string | null | undefined,
+): MilkDrinkOption | null {
+  if (!id) return null;
+  return MILK_DRINK_OPTIONS.find((d) => d.id === id) ?? null;
+}
+
+export function isNearMilkVending(
+  x: number,
+  z: number,
+  maxDist = 8.5,
+): boolean {
+  return (
+    Math.hypot(x - (LANDMARKS.milkBooth.x + 1.0), z - LANDMARKS.milkBooth.z) <=
+    maxDist
+  );
+}
+
+export const MILK_SOCIAL_MESSAGES = {
+  offerPrompt: (senderName: string, drinkLabel: string) =>
+    `${senderName}가 김이 모락모락 나는 ${drinkLabel}를 두 앞발로 내밀며 눈을 반짝이고 있어요. 받으실래요?`,
+  acceptReceiverToast: (senderName: string, drinkLabel: string) =>
+    `${senderName}에게서 받은 ${drinkLabel}를 꿀꺽! 온천처럼 따끈하다냥 🥛💕`,
+  acceptSenderToast: (receiverName: string, drinkLabel: string) =>
+    `${receiverName}가 ${drinkLabel} 선물을 기쁘게 받았어요! "고맙다냥! 온몸이 노곤해져~" ✨`,
+  declineReplyText:
+    '방금 온천수를 많이 마셔서 배가 볼록하다냥... 마음만 고맙게 받을게! 🐾',
+  declineReceiverToast:
+    '정중하게 마음만 받았어요. (배가 볼록하다냥~ 🐾)',
+  declineSenderToast: (receiverName: string) =>
+    `${receiverName}: "배가 부르다냥... 아껴 마실게, 마음만 고마워!" 🐾`,
+  requestPrompt: (requesterName: string, drinkLabel: string) =>
+    `${requesterName}가 우유 자판기 앞에서 두 앞발을 모으고 "${drinkLabel} 한 병만 사달라냥~ 🥺" 하며 애교 부리고 있어요!`,
+  requestDeclineText:
+    '어라... 주머니에 도토리만 들어있고 동전이 없다냥! 다음에 꼭 뽑아줄게~ 🌰🐾',
+  requestDeclineSenderToast: (targetName: string) =>
+    `${targetName}: "주머니에 도토리뿐이라 미안하다냥~ 다음에 꼭 뽑아줄게!" 🌰🐾`,
+} as const;
+
 export const ACTION_SPOTS = {
   bathSoakSpot: { x: 0, z: 5.0 },
-  benchSitSpot: { x: 14.1, z: 8.8, heading: -0.75 },
-  benchBirdTarget: { x: 14.85, y: 0.46, z: 8.35 },
-  benchBirdPerchHigh: { x: 18.2, y: 5.4, z: 4.5 },
-  firewoodPickupSpot: { x: -4.2, z: -26.5, heading: -0.6 },
-  firewoodFurnaceSpot: { x: -1.4, z: -26.5, heading: 0.45 },
-  eggBasketSpot: { x: 3.6, z: 14.05, heading: 0.08 },
+  benchSitSpot: {
+    x: LANDMARKS.milkBooth.x - 1.9,
+    z: LANDMARKS.milkBooth.z + 0.8,
+    heading: -0.75,
+  },
+  milkVendingSpot: {
+    x: LANDMARKS.milkBooth.x + 0.85,
+    z: LANDMARKS.milkBooth.z - 0.55,
+    heading: -0.35,
+  },
+  benchBirdTarget: {
+    x: LANDMARKS.milkBooth.x - 1.15,
+    y: 0.46,
+    z: LANDMARKS.milkBooth.z + 0.35,
+  },
+  benchBirdPerchHigh: {
+    x: LANDMARKS.milkBooth.x + 2.2,
+    y: 5.4,
+    z: LANDMARKS.milkBooth.z - 3.5,
+  },
+  firewoodPickupSpot: {
+    x: LANDMARKS.firewoodYard.x - 1.2,
+    z: LANDMARKS.firewoodYard.z + 1.5,
+    heading: -0.6,
+  },
+  firewoodFurnaceSpot: {
+    x: LANDMARKS.firewoodYard.x + 1.6,
+    z: LANDMARKS.firewoodYard.z + 1.5,
+    heading: 0.45,
+  },
+  eggBasketSpot: {
+    x: LANDMARKS.eggBasket.x - 0.1,
+    z: LANDMARKS.eggBasket.z + 2.35,
+    heading: 0.08,
+  },
 } as const;
 
 export const KNEAD_LOOP_DURATION = 4.8;
 export const GREET_DURATION = 1.9;
+export const GROOM_DURATION = 3.2;
 export const SOAK_YUZU_DELAY = 2.4;
 
 /**
  * Computes distance-attenuated water volume [0..0.22] within 9m of hot springs,
- * entrance creek, or the eastern footbath stream at (22, 28).
+ * entrance creek, or the eastern footbath stream.
  */
 export function computeWaterGain(x: number, z: number): number {
   const bathEdgeDist = Math.max(
@@ -145,11 +223,14 @@ export function computeWaterGain(x: number, z: number): number {
     0,
     Math.hypot(x - LANDMARKS.yuzuPond.x, z - LANDMARKS.yuzuPond.z) - 3.6,
   );
-  const creekCenterZ = 38 + Math.sin(x * 0.11) * 1.4;
+  const creekCenterZ = LANDMARKS.entranceBridge.z + Math.sin(x * 0.11) * 1.4;
   const creekDist = Math.max(0, Math.abs(z - creekCenterZ) - 2.2);
 
-  // Eastern footbath stream ribbon x in [16.2, 27.8]
-  const clampedStreamX = Math.max(16.2, Math.min(27.8, x));
+  // Eastern footbath stream ribbon
+  const clampedStreamX = Math.max(
+    LANDMARKS.footStream.x - 5.8,
+    Math.min(LANDMARKS.footStream.x + 5.8, x),
+  );
   const streamZ = footStreamCenterZ(clampedStreamX);
   const footStreamDist = Math.max(
     0,
@@ -164,7 +245,40 @@ export function computeWaterGain(x: number, z: number): number {
 
 /**
  * Computes collective purring sound intensity [0..1] near the open-air bath,
- * Myoyeongak hearth room, or during cozy cat actions (knead/loaf/soak).
+ * Myoyeongak hearth room, or during cozy cat actions (knead/loaf/soak/groom).
+ */
+export interface SpatialNatureMix {
+  cedarGain: number;
+  bambooGain: number;
+  waterwheelGain: number;
+}
+
+/**
+ * Computes proximity-driven ambient gains [0..1] for the cedar forest canopy,
+ * southwestern bamboo grove, and eastern footbath waterwheel.
+ */
+export function computeForestWindGain(x: number, z: number): SpatialNatureMix {
+  let nearestCedarDist = Infinity;
+  for (const tree of CEDAR_TREES) {
+    const d = Math.hypot(x - tree.x, z - tree.z);
+    if (d < nearestCedarDist) {
+      nearestCedarDist = d;
+    }
+  }
+  const cedarGain = Math.max(0, Math.min(1, 1 - Math.max(0, nearestCedarDist - 3.0) / 10.0));
+
+  const bambooDist = Math.hypot(x - LANDMARKS.bambooShishi.x, z - LANDMARKS.bambooShishi.z);
+  const bambooGain = Math.max(0, Math.min(1, 1 - Math.max(0, bambooDist - 2.5) / 11.5));
+
+  const wheelDist = Math.hypot(x - FOOTBATH_WATERWHEEL_POS.x, z - FOOTBATH_WATERWHEEL_POS.z);
+  const waterwheelGain = Math.max(0, Math.min(1, 1 - Math.max(0, wheelDist - 2.0) / 12.0));
+
+  return { cedarGain, bambooGain, waterwheelGain };
+}
+
+/**
+ * Computes collective purring sound intensity [0..1] near the open-air bath,
+ * Myoyeongak hearth room, or during cozy cat actions (knead/loaf/soak/groom).
  */
 export function computePurrProximity(
   x: number,
@@ -178,11 +292,16 @@ export function computePurrProximity(
   const hallFactor = Math.max(0, 1 - Math.max(0, hallDist - 3.5) / 9.5);
 
   const actionBoost =
-    actionMode === 'knead' || actionMode === 'loaf' || actionMode === 'soak'
+    actionMode === 'knead' ||
+    actionMode === 'loaf' ||
+    actionMode === 'soak' ||
+    actionMode === 'groom'
       ? 0.45
-      : actionMode === 'sitBench'
-        ? 0.25
-        : 0;
+      : actionMode === 'footSoak'
+        ? 0.35
+        : actionMode === 'sitBench'
+          ? 0.25
+          : 0;
 
   return Math.min(1, Math.max(bathFactor * 0.85, hallFactor * 0.8, actionBoost));
 }
@@ -203,26 +322,60 @@ export function detectFootstepSurface(x: number, z: number): FootstepSurface {
     return 'wood';
   }
 
-  // Bath stairs & rim
-  if (bathDist <= 11.5 && Math.abs(x) <= 2.4 && Math.abs(z - 4) >= 5.2) {
-    return 'wood';
-  }
-
   // Myoyeongak deck & tatami
-  if (Math.abs(x) <= 6.4 && z >= -16.6 && z <= -4.4) {
+  const pav = LANDMARKS.myoyeongak;
+  if (Math.abs(x) <= pav.halfW + 0.2 && z >= pav.minZ - 0.2 && z <= pav.maxZ + 2.0) {
     return 'wood';
   }
 
   // Milk booth wooden bench
-  if (x >= 12.4 && x <= 15.8 && z >= 7.4 && z <= 10.2) {
+  if (
+    x >= LANDMARKS.milkBooth.x - 3.6 &&
+    x <= LANDMARKS.milkBooth.x - 0.2 &&
+    z >= LANDMARKS.milkBooth.z - 0.6 &&
+    z <= LANDMARKS.milkBooth.z + 2.2
+  ) {
     return 'wood';
   }
 
-  // Eastern footbath stepping stones
+  // Eastern 2x6 hinoki footbath decks
+  if (isOnFootbathDeck(x, z)) {
+    return 'wood';
+  }
+
+  // Central wooden boardwalk walkways
+  if (isOnBoardwalkWalkway(x, z, 0.15)) {
+    return 'wood';
+  }
+
+  // Eastern footbath stepping stones (checked before stream water)
   for (const stone of FOOT_STREAM_STEPSTONES) {
     if (Math.hypot(x - stone.x, z - stone.z) <= stone.r * 1.05) {
-      return 'wood';
+      return 'stone';
     }
+  }
+
+  // Main bath stone rim & stairs
+  if (bathDist <= 11.5 && Math.abs(x) <= 2.4 && Math.abs(z - 4) >= 5.2) {
+    return 'stone';
+  }
+  if (bathDist <= 10.6) {
+    return 'stone';
+  }
+
+  // Milk booth flagstone apron
+  if (
+    x >= LANDMARKS.milkBooth.x - 4.0 &&
+    x <= LANDMARKS.milkBooth.x + 2.2 &&
+    z >= LANDMARKS.milkBooth.z - 2.6 &&
+    z <= LANDMARKS.milkBooth.z + 3.2
+  ) {
+    return 'stone';
+  }
+
+  // Outer forest stone trails (bamboo, footbath stream, firewood)
+  if (distToWalkway(x, z) <= 0.15) {
+    return 'stone';
   }
 
   const h = groundHeightAt(x, z);
@@ -241,6 +394,7 @@ export type NearbyInteractKind =
   | 'milk_vending'
   | 'yuzu_pond'
   | 'shishi_odoshi'
+  | 'footbath_seat'
   | 'egg_basket';
 
 export interface NearbyInteractPrompt {
@@ -280,9 +434,9 @@ const INTERACT_SPOT_DESCRIPTORS: readonly InteractSpotDescriptor[] = [
   },
   {
     kind: 'milk_vending',
-    x: LANDMARKS.milkBooth.x + 1.5,
-    z: LANDMARKS.milkBooth.z - 1.8,
-    maxDist: 4.6,
+    x: LANDMARKS.milkBooth.x + 0.4,
+    z: LANDMARKS.milkBooth.z - 0.5,
+    maxDist: 6.0,
     label: '🥛 우유 자판기 열기',
     hint: 'F 또는 클릭 · 꾹꾹이 병우유 뽑기',
   },
@@ -301,6 +455,15 @@ const INTERACT_SPOT_DESCRIPTORS: readonly InteractSpotDescriptor[] = [
     maxDist: 6.5,
     label: '🍊 감사·응원 유자 띄우기',
     hint: 'F 또는 클릭 · 따뜻한 쪽지 띄우기',
+  },
+  {
+    kind: 'footbath_seat',
+    x: LANDMARKS.footStream.x,
+    z: LANDMARKS.footStream.z,
+    maxDist: 7.4,
+    label: '🦶 따뜻한 족욕 데크 앉기',
+    hint: 'F 또는 클릭 · 온천 폭포 쉼터에 발 담그기',
+    condition: (_carrying, actionMode) => actionMode !== 'footSoak',
   },
   {
     kind: 'egg_basket',

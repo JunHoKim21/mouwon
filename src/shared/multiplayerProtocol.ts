@@ -2,6 +2,7 @@ import type { CatCoatId } from '../world/catCoats.ts';
 import {
   clampWishMessage,
   type CatActionMode,
+  type MilkDrinkId,
   type WishYuzuItem,
 } from '../world/ritualMath.ts';
 
@@ -23,15 +24,25 @@ export const VALID_ACTION_MODES: readonly CatActionMode[] = [
   'idle',
   'walk',
   'greet',
+  'groom',
   'knead',
   'loaf',
   'soak',
   'sitBench',
+  'footSoak',
   'carrying',
+] as const;
+
+export const VALID_MILK_IDS: readonly MilkDrinkId[] = [
+  'banana',
+  'strawberry',
+  'white',
+  'matatabi',
 ] as const;
 
 const COAT_SET = new Set<string>(VALID_COAT_IDS);
 const ACTION_SET = new Set<string>(VALID_ACTION_MODES);
+const MILK_SET = new Set<string>(VALID_MILK_IDS);
 
 export type MultiplayerConnectionState = 'offline' | 'connecting' | 'connected';
 
@@ -55,6 +66,7 @@ export interface RemotePeerState {
   moveSpeed: number;
   hasHeadYuzu: boolean;
   carryingFirewood: boolean;
+  heldMilkId?: MilkDrinkId | null;
 }
 
 export type ClientPlayerPayload = Omit<RemotePeerState, 'id'>;
@@ -65,7 +77,11 @@ export type ClientToServerMessage =
   | { type: 'yuzu_add'; wish: WishYuzuItem }
   | { type: 'fire_stoke' }
   | { type: 'bamboo_ring' }
-  | { type: 'milk_gift'; targetPeerId?: string };
+  | { type: 'milk_gift'; targetPeerId?: string }
+  | { type: 'milk_offer'; targetPeerId: string; drinkId: MilkDrinkId }
+  | { type: 'milk_respond'; toPeerId: string; drinkId: MilkDrinkId; accepted: boolean }
+  | { type: 'milk_request'; targetPeerId: string; drinkId: MilkDrinkId }
+  | { type: 'milk_request_decline'; toPeerId: string; drinkId: MilkDrinkId };
 
 export type ServerToClientMessage =
   | {
@@ -83,7 +99,36 @@ export type ServerToClientMessage =
   | { type: 'yuzu_add'; wish: WishYuzuItem; fromPeerId: string }
   | { type: 'fire_stoke'; fromPeerId: string; fireCount: number }
   | { type: 'bamboo_ring'; fromPeerId: string }
-  | { type: 'milk_gift'; fromPeerId: string; targetPeerId?: string };
+  | { type: 'milk_gift'; fromPeerId: string; targetPeerId?: string }
+  | {
+      type: 'milk_offer';
+      fromPeerId: string;
+      fromCoatId: CatCoatId;
+      targetPeerId: string;
+      drinkId: MilkDrinkId;
+    }
+  | {
+      type: 'milk_respond';
+      fromPeerId: string;
+      fromCoatId: CatCoatId;
+      toPeerId: string;
+      drinkId: MilkDrinkId;
+      accepted: boolean;
+    }
+  | {
+      type: 'milk_request';
+      fromPeerId: string;
+      fromCoatId: CatCoatId;
+      targetPeerId: string;
+      drinkId: MilkDrinkId;
+    }
+  | {
+      type: 'milk_request_decline';
+      fromPeerId: string;
+      fromCoatId: CatCoatId;
+      toPeerId: string;
+      drinkId: MilkDrinkId;
+    };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -108,13 +153,28 @@ function normalizeColorHex(value: unknown): string {
   return '#f4be2b';
 }
 
+function normalizeMilkId(value: unknown): MilkDrinkId | null {
+  return typeof value === 'string' && MILK_SET.has(value)
+    ? (value as MilkDrinkId)
+    : null;
+}
+
+function normalizeCoatId(value: unknown): CatCoatId {
+  return typeof value === 'string' && COAT_SET.has(value)
+    ? (value as CatCoatId)
+    : 'cheese';
+}
+
+function sanitizePeerId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().slice(0, 64);
+  return trimmed ? trimmed : null;
+}
+
 export function sanitizePeerPayload(raw: unknown): ClientPlayerPayload | null {
   if (!isRecord(raw)) return null;
 
-  const coatId: CatCoatId =
-    typeof raw.coatId === 'string' && COAT_SET.has(raw.coatId)
-      ? (raw.coatId as CatCoatId)
-      : 'cheese';
+  const coatId = normalizeCoatId(raw.coatId);
 
   const actionMode: CatActionMode =
     typeof raw.actionMode === 'string' && ACTION_SET.has(raw.actionMode)
@@ -131,6 +191,7 @@ export function sanitizePeerPayload(raw: unknown): ClientPlayerPayload | null {
     moveSpeed: clampFinite(raw.moveSpeed, 0, 20, 0),
     hasHeadYuzu: Boolean(raw.hasHeadYuzu),
     carryingFirewood: Boolean(raw.carryingFirewood),
+    heldMilkId: normalizeMilkId(raw.heldMilkId),
   };
 }
 
@@ -190,11 +251,41 @@ export function parseClientMessage(rawText: string): ClientToServerMessage | nul
     case 'bamboo_ring':
       return { type: 'bamboo_ring' };
     case 'milk_gift': {
-      const targetPeerId =
-        typeof parsed.targetPeerId === 'string' && parsed.targetPeerId.trim()
-          ? parsed.targetPeerId.trim().slice(0, 64)
-          : undefined;
+      const targetPeerId = sanitizePeerId(parsed.targetPeerId) ?? undefined;
       return { type: 'milk_gift', targetPeerId };
+    }
+    case 'milk_offer': {
+      const targetPeerId = sanitizePeerId(parsed.targetPeerId);
+      const drinkId = normalizeMilkId(parsed.drinkId);
+      return targetPeerId && drinkId
+        ? { type: 'milk_offer', targetPeerId, drinkId }
+        : null;
+    }
+    case 'milk_respond': {
+      const toPeerId = sanitizePeerId(parsed.toPeerId);
+      const drinkId = normalizeMilkId(parsed.drinkId);
+      return toPeerId && drinkId
+        ? {
+            type: 'milk_respond',
+            toPeerId,
+            drinkId,
+            accepted: Boolean(parsed.accepted),
+          }
+        : null;
+    }
+    case 'milk_request': {
+      const targetPeerId = sanitizePeerId(parsed.targetPeerId);
+      const drinkId = normalizeMilkId(parsed.drinkId);
+      return targetPeerId && drinkId
+        ? { type: 'milk_request', targetPeerId, drinkId }
+        : null;
+    }
+    case 'milk_request_decline': {
+      const toPeerId = sanitizePeerId(parsed.toPeerId);
+      const drinkId = normalizeMilkId(parsed.drinkId);
+      return toPeerId && drinkId
+        ? { type: 'milk_request_decline', toPeerId, drinkId }
+        : null;
     }
     default:
       return null;
@@ -292,6 +383,63 @@ export function parseServerMessage(rawText: string): ServerToClientMessage | nul
         fromPeerId: parsed.fromPeerId,
         targetPeerId,
       };
+    }
+    case 'milk_offer': {
+      const fromPeerId = sanitizePeerId(parsed.fromPeerId);
+      const targetPeerId = sanitizePeerId(parsed.targetPeerId);
+      const drinkId = normalizeMilkId(parsed.drinkId);
+      return fromPeerId && targetPeerId && drinkId
+        ? {
+            type: 'milk_offer',
+            fromPeerId,
+            fromCoatId: normalizeCoatId(parsed.fromCoatId),
+            targetPeerId,
+            drinkId,
+          }
+        : null;
+    }
+    case 'milk_respond': {
+      const fromPeerId = sanitizePeerId(parsed.fromPeerId);
+      const toPeerId = sanitizePeerId(parsed.toPeerId);
+      const drinkId = normalizeMilkId(parsed.drinkId);
+      return fromPeerId && toPeerId && drinkId
+        ? {
+            type: 'milk_respond',
+            fromPeerId,
+            fromCoatId: normalizeCoatId(parsed.fromCoatId),
+            toPeerId,
+            drinkId,
+            accepted: Boolean(parsed.accepted),
+          }
+        : null;
+    }
+    case 'milk_request': {
+      const fromPeerId = sanitizePeerId(parsed.fromPeerId);
+      const targetPeerId = sanitizePeerId(parsed.targetPeerId);
+      const drinkId = normalizeMilkId(parsed.drinkId);
+      return fromPeerId && targetPeerId && drinkId
+        ? {
+            type: 'milk_request',
+            fromPeerId,
+            fromCoatId: normalizeCoatId(parsed.fromCoatId),
+            targetPeerId,
+            drinkId,
+          }
+        : null;
+    }
+    case 'milk_request_decline': {
+      const fromPeerId = sanitizePeerId(parsed.fromPeerId);
+      const toPeerId = sanitizePeerId(parsed.toPeerId);
+      const drinkId = normalizeMilkId(parsed.drinkId);
+      return fromPeerId && toPeerId && drinkId
+        ? {
+            type: 'milk_request_decline',
+            fromPeerId,
+            fromCoatId: normalizeCoatId(parsed.fromCoatId),
+            toPeerId,
+            drinkId,
+          }
+        : null;
     }
     default:
       return null;

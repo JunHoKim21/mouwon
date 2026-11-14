@@ -7,6 +7,10 @@ export interface CatAvatarController {
   root: THREE.Group;
   setCoat: (coatId: CatCoatId) => void;
   triggerGiftAfterglow: () => void;
+  setHeldMilk: (bottleColor: string | null, capColor?: string) => void;
+  triggerDrinkMilk: (bottleColor?: string, capColor?: string) => void;
+  triggerEatEgg: () => void;
+  showSpeechBubble: (text: string, duration?: number) => void;
   update: (
     dt: number,
     moveSpeed: number,
@@ -369,6 +373,121 @@ export function createCatAvatar(
   carriedLogGroup.visible = false;
   bodyGroup.add(carriedLogGroup);
 
+  // Held milk bottle prop in front of paws/chest when holding or drinking warm milk
+  const heldMilkGroup = new THREE.Group();
+  heldMilkGroup.position.set(0, 0.03, 0.48);
+  const heldMilkBodyMat = new THREE.MeshStandardMaterial({
+    color: '#f7df7c',
+    emissive: new THREE.Color('#f7df7c'),
+    emissiveIntensity: 0.22,
+    roughness: 0.25,
+    metalness: 0.04,
+  });
+  const heldMilkCapMat = new THREE.MeshStandardMaterial({
+    color: '#d9842b',
+    emissive: new THREE.Color('#d9842b'),
+    emissiveIntensity: 0.16,
+    roughness: 0.38,
+  });
+  const heldMilkRimMat = new THREE.MeshStandardMaterial({
+    color: 0xfffdf7,
+    roughness: 0.22,
+    metalness: 0.05,
+  });
+  const heldMilkLabelMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: new THREE.Color(0xfff5e4),
+    emissiveIntensity: 0.14,
+    roughness: 0.5,
+  });
+  const heldMilkBody = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.066, 0.072, 0.15, 16),
+    heldMilkBodyMat,
+  );
+  heldMilkBody.castShadow = true;
+  const heldMilkShoulder = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04, 0.066, 0.048, 16),
+    heldMilkBodyMat,
+  );
+  heldMilkShoulder.position.y = 0.095;
+  const heldMilkNeck = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.044, 0.04, 0.022, 16),
+    heldMilkRimMat,
+  );
+  heldMilkNeck.position.y = 0.126;
+  const heldMilkCap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.047, 0.047, 0.024, 16),
+    heldMilkCapMat,
+  );
+  heldMilkCap.position.y = 0.146;
+  const heldMilkLabel = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.071, 0.074, 0.06, 16),
+    heldMilkLabelMat,
+  );
+  heldMilkLabel.position.y = -0.005;
+  const heldMilkStripe = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.0725, 0.075, 0.018, 16),
+    heldMilkCapMat,
+  );
+  heldMilkStripe.position.y = -0.005;
+  heldMilkGroup.add(
+    heldMilkBody,
+    heldMilkShoulder,
+    heldMilkNeck,
+    heldMilkCap,
+    heldMilkLabel,
+    heldMilkStripe,
+  );
+  heldMilkGroup.visible = false;
+  bodyGroup.add(heldMilkGroup);
+
+  // Soft-boiled onsen egg held in paws after dipping ritual completes
+  const heldEggGroup = new THREE.Group();
+  heldEggGroup.position.set(0, 0.1, 0.49);
+  const eggWhiteGeo = new THREE.SphereGeometry(0.058, 14, 12);
+  eggWhiteGeo.scale(1.0, 1.28, 1.0);
+  const eggWhiteMat = new THREE.MeshStandardMaterial({
+    color: 0xfffcf2,
+    emissive: new THREE.Color(0xfff0d0),
+    emissiveIntensity: 0.2,
+    roughness: 0.32,
+  });
+  const eggWhite = new THREE.Mesh(eggWhiteGeo, eggWhiteMat);
+  const eggYolkMat = new THREE.MeshStandardMaterial({
+    color: 0xff9a2e,
+    emissive: new THREE.Color(0xff7b00),
+    emissiveIntensity: 0.28,
+    roughness: 0.25,
+  });
+  const eggYolk = new THREE.Mesh(
+    new THREE.SphereGeometry(0.042, 12, 10),
+    eggYolkMat,
+  );
+  eggYolk.position.set(0, 0.032, 0.016);
+  heldEggGroup.add(eggWhite, eggYolk);
+  heldEggGroup.visible = false;
+  bodyGroup.add(heldEggGroup);
+
+  // Overhead 3D speech bubble sprite rendered with canvas texture
+  const speechCanvas = document.createElement('canvas');
+  speechCanvas.width = 512;
+  speechCanvas.height = 128;
+  const speechTexture = new THREE.CanvasTexture(speechCanvas);
+  speechTexture.colorSpace = THREE.SRGBColorSpace;
+  const speechMat = new THREE.SpriteMaterial({
+    map: speechTexture,
+    transparent: true,
+    opacity: 0,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const speechSprite = new THREE.Sprite(speechMat);
+  speechSprite.position.set(0, 0.88, 0);
+  speechSprite.scale.set(1.15, 0.29, 1);
+  speechSprite.visible = false;
+  speechSprite.renderOrder = 10;
+  rig.add(speechSprite);
+
   // Warm pink milk-gift afterglow ring & rising warmth orbs
   const pinkAuraGroup = new THREE.Group();
   pinkAuraGroup.visible = false;
@@ -514,8 +633,89 @@ export function createCatAvatar(
   let carriedLogScale = 0;
   let pinkGiftTimer = 0;
   let earTwitchTimer = 4.2;
+  let heldMilkActive = false;
+  let selfMilkTimer = 0;
+  let milkBottleScale = 0;
+  let selfEggTimer = 0;
+  let eggPropScale = 0;
+  let speechTimer = 0;
+  let speechDuration = 2.8;
 
   const triggerGiftAfterglow = () => {
+    pinkGiftTimer = 4.5;
+  };
+
+  const triggerEatEgg = () => {
+    selfEggTimer = 3.8;
+    pinkGiftTimer = 3.8;
+  };
+
+  const showSpeechBubble = (text: string, duration = 2.8) => {
+    const ctx = speechCanvas.getContext('2d');
+    if (!ctx) return;
+    const w = speechCanvas.width;
+    const h = speechCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Measure text so pill hugs short messages gracefully
+    ctx.font = '600 28px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+    const measured = Math.min(w - 56, Math.max(150, Math.ceil(ctx.measureText(text).width) + 52));
+    const x = (w - measured) / 2;
+    const y = 10;
+    const bw = measured;
+    const bh = 86;
+    const r = 38;
+
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + bw - r, y);
+    ctx.quadraticCurveTo(x + bw, y, x + bw, y + r);
+    ctx.lineTo(x + bw, y + bh - r);
+    ctx.quadraticCurveTo(x + bw, y + bh, x + bw - r, y + bh);
+    ctx.lineTo(w / 2 + 13, y + bh);
+    ctx.lineTo(w / 2, y + bh + 18);
+    ctx.lineTo(w / 2 - 13, y + bh);
+    ctx.lineTo(x + r, y + bh);
+    ctx.quadraticCurveTo(x, y + bh, x, y + bh - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+
+    ctx.fillStyle = '#fffcf5';
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#d9842b';
+    ctx.stroke();
+
+    ctx.fillStyle = '#2c251d';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, w / 2, y + bh / 2, w - 64);
+
+    speechTexture.needsUpdate = true;
+    speechTimer = duration;
+    speechDuration = duration;
+  };
+
+  const setHeldMilk = (bottleColor: string | null, capColor = '#d9842b') => {
+    if (!bottleColor) {
+      heldMilkActive = false;
+      return;
+    }
+    heldMilkBodyMat.color.set(bottleColor);
+    heldMilkBodyMat.emissive.set(bottleColor);
+    heldMilkCapMat.color.set(capColor);
+    heldMilkCapMat.emissive.set(capColor);
+    heldMilkActive = true;
+  };
+
+  const triggerDrinkMilk = (bottleColor = '#f7df7c', capColor = '#d9842b') => {
+    heldMilkBodyMat.color.set(bottleColor);
+    heldMilkBodyMat.emissive.set(bottleColor);
+    heldMilkCapMat.color.set(capColor);
+    heldMilkCapMat.emissive.set(capColor);
+    heldMilkActive = false;
+    selfMilkTimer = 4.2;
     pinkGiftTimer = 4.5;
   };
 
@@ -530,101 +730,263 @@ export function createCatAvatar(
   ) => {
     const safeDt = Math.min(dt, 0.08);
     elapsed += safeDt;
+    if (selfMilkTimer > 0) {
+      selfMilkTimer = Math.max(0, selfMilkTimer - safeDt);
+    }
+    if (selfEggTimer > 0) {
+      selfEggTimer = Math.max(0, selfEggTimer - safeDt);
+    }
 
-    const speedRatio = Math.min(1, moveSpeed / 2.6);
+    const speedRatio = Math.min(1, moveSpeed / 1.65);
+    const isDrinkingMilk = selfMilkTimer > 0;
+    const isEatingEgg = selfEggTimer > 0 && !isDrinkingMilk;
+    const isHoldingMilk =
+      heldMilkActive &&
+      !Boolean(isCarryingFirewood) &&
+      !isDrinkingMilk &&
+      !isEatingEgg;
     const isSoaking = actionMode === 'soak';
+    const isFootSoak = actionMode === 'footSoak';
+    const isGroom = actionMode === 'groom';
     const isLoaf = actionMode === 'loaf' || actionMode === 'sitBench';
     const isKnead = actionMode === 'knead';
     const isGreet = actionMode === 'greet';
     const carrying = Boolean(isCarryingFirewood) || actionMode === 'carrying';
+    const inBathPosture = !isLoaf && !isKnead && !isFootSoak && (isSoaking || hasHeadTowel === true);
 
-    // 1. Quadruped walking gait or ritual leg poses
+    // 1. Relaxed cute quadruped walking gait or ritual leg poses
     if (speedRatio > 0.04) {
-      walkPhase += safeDt * (6.5 + speedRatio * 5.0);
+      walkPhase += safeDt * (4.8 + speedRatio * 3.2);
     }
 
-    let targetFL = Math.sin(walkPhase) * 0.55 * speedRatio;
-    let targetFR = -Math.sin(walkPhase) * 0.55 * speedRatio;
-    let targetBL = -Math.sin(walkPhase) * 0.55 * speedRatio;
-    let targetBR = Math.sin(walkPhase) * 0.55 * speedRatio;
-    let targetLegScaleY = 1.0;
+    let targetFL = Math.sin(walkPhase) * 0.46 * speedRatio;
+    let targetFR = -Math.sin(walkPhase) * 0.46 * speedRatio;
+    let targetBL = -Math.sin(walkPhase) * 0.46 * speedRatio;
+    let targetBR = Math.sin(walkPhase) * 0.46 * speedRatio;
+    let targetFLZ = 0;
+    let targetFRZ = 0;
+    let targetFrontLegScaleY = 1.0;
+    let targetBackLegScaleY = 1.0;
 
-    if (isKnead) {
-      // Rhythmic alternating front-paw kneading
+    if (isDrinkingMilk || isEatingEgg) {
+      // Lift both front paws forward to wrap the bottle or warm egg near mouth
+      const nibSpeed = isEatingEgg ? 11.0 : 8.5;
+      const sipBob = Math.sin(elapsed * nibSpeed) * 0.09;
+      targetFL = (isEatingEgg ? -1.42 : -1.46) + sipBob;
+      targetFR = (isEatingEgg ? -1.42 : -1.46) + sipBob;
+      targetFLZ = -0.18;
+      targetFRZ = 0.18;
+      targetBL = inBathPosture ? -0.65 : -0.95;
+      targetBR = inBathPosture ? -0.65 : -0.95;
+      targetFrontLegScaleY = inBathPosture ? 0.65 : 0.92;
+      targetBackLegScaleY = inBathPosture ? 0.65 : isFootSoak ? 0.42 : 0.92;
+    } else if (isHoldingMilk) {
+      // Reach both front paws forward so the milk bottle sits clearly outside chest & muzzle
+      targetFL = -1.32 + Math.sin(walkPhase) * 0.14 * speedRatio;
+      targetFR = -1.32 - Math.sin(walkPhase) * 0.14 * speedRatio;
+      targetFLZ = -0.18;
+      targetFRZ = 0.18;
+      targetFrontLegScaleY = inBathPosture ? 0.65 : 0.92;
+      targetBackLegScaleY = isFootSoak ? 0.42 : targetFrontLegScaleY;
+    } else if (isKnead) {
+      // Rhythmic alternating front-paw kneading clearly visible on cushion
       const kneadPhase = actionTime * 4.4;
-      targetFL = -0.45 + Math.sin(kneadPhase) * 0.34;
-      targetFR = -0.45 - Math.sin(kneadPhase) * 0.34;
-      targetBL = 0.35;
-      targetBR = 0.35;
-      targetLegScaleY = 0.85;
+      targetFL = -0.64 + Math.sin(kneadPhase) * 0.38;
+      targetFR = -0.64 - Math.sin(kneadPhase) * 0.38;
+      targetBL = -0.85;
+      targetBR = -0.85;
+      targetFrontLegScaleY = 0.94;
+      targetBackLegScaleY = 0.56;
+    } else if (isGroom) {
+      // Cute face-washing groom: left front paw reaches cleanly outside cheek & wipes cyclically
+      const groomCycle = actionTime * 4.8;
+      targetFL = (inBathPosture ? -1.95 : -1.68) + Math.sin(groomCycle) * 0.3;
+      targetFLZ = -0.32 + Math.cos(groomCycle) * 0.08;
+      targetFR = inBathPosture ? 0.55 : 0.12;
+      targetBL = inBathPosture ? -0.65 : -0.95;
+      targetBR = inBathPosture ? -0.65 : -0.95;
+      targetFrontLegScaleY = inBathPosture ? 0.68 : 0.94;
+      targetBackLegScaleY = inBathPosture ? 0.62 : 0.56;
     } else if (isLoaf) {
       // Front & back paws tucked cleanly underneath for loafing / bench sitting
-      targetFL = 1.15;
-      targetFR = 1.15;
+      targetFL = 1.02;
+      targetFR = 1.02;
       targetBL = -1.1;
       targetBR = -1.1;
-      targetLegScaleY = 0.36;
+      targetFrontLegScaleY = 0.36;
+      targetBackLegScaleY = 0.36;
+    } else if (isFootSoak) {
+      // Hind paws seated neatly on hinoki cushion while front paws dip deep into stream water
+      const paddle = Math.sin(elapsed * 2.2) * 0.11;
+      targetFL = -0.22 + paddle;
+      targetFR = -0.22 - paddle;
+      targetBL = -1.12;
+      targetBR = -1.12;
+      targetFrontLegScaleY = 1.42;
+      targetBackLegScaleY = 0.36;
+    } else if (inBathPosture && speedRatio > 0.04) {
+      // Smooth underwater wading stride while moving inside the bath
+      targetFL = 0.25 + Math.sin(walkPhase) * 0.32 * speedRatio;
+      targetFR = 0.25 - Math.sin(walkPhase) * 0.32 * speedRatio;
+      targetBL = -0.35 - Math.sin(walkPhase) * 0.32 * speedRatio;
+      targetBR = -0.35 + Math.sin(walkPhase) * 0.32 * speedRatio;
+      targetFrontLegScaleY = 0.62;
+      targetBackLegScaleY = 0.62;
     } else if (isSoaking) {
       // Relaxed seated soak posture below the water line
       targetFL = 0.55;
       targetFR = 0.55;
       targetBL = -0.65;
       targetBR = -0.65;
-      targetLegScaleY = 0.52;
+      targetFrontLegScaleY = 0.52;
+      targetBackLegScaleY = 0.52;
     }
 
+    const holdingBottlePaws = isDrinkingMilk || isHoldingMilk || isEatingEgg;
+    const frontLegPivotZ = holdingBottlePaws
+      ? 0.25
+      : isFootSoak || isKnead
+        ? 0.205
+        : 0.165;
+    const frontLegPivotY = holdingBottlePaws
+      ? isDrinkingMilk || isEatingEgg
+        ? 0.02
+        : -0.01
+      : isFootSoak
+        ? -0.075
+        : -0.06;
+    const frontLegPivotX = holdingBottlePaws
+      ? 0.095
+      : isGroom && !inBathPosture
+        ? 0.125
+        : 0.105;
+    legFL.position.x = THREE.MathUtils.damp(legFL.position.x, frontLegPivotX, 12, safeDt);
+    legFL.position.y = THREE.MathUtils.damp(legFL.position.y, frontLegPivotY, 12, safeDt);
+    legFL.position.z = THREE.MathUtils.damp(legFL.position.z, frontLegPivotZ, 12, safeDt);
+    legFR.position.x = THREE.MathUtils.damp(legFR.position.x, -frontLegPivotX, 12, safeDt);
+    legFR.position.y = THREE.MathUtils.damp(legFR.position.y, frontLegPivotY, 12, safeDt);
+    legFR.position.z = THREE.MathUtils.damp(legFR.position.z, frontLegPivotZ, 12, safeDt);
+
     legFL.rotation.x = THREE.MathUtils.damp(legFL.rotation.x, targetFL, 14, safeDt);
+    legFL.rotation.z = THREE.MathUtils.damp(legFL.rotation.z, targetFLZ, 12, safeDt);
     legFR.rotation.x = THREE.MathUtils.damp(legFR.rotation.x, targetFR, 14, safeDt);
+    legFR.rotation.z = THREE.MathUtils.damp(legFR.rotation.z, targetFRZ, 12, safeDt);
     legBL.rotation.x = THREE.MathUtils.damp(legBL.rotation.x, targetBL, 14, safeDt);
     legBR.rotation.x = THREE.MathUtils.damp(legBR.rotation.x, targetBR, 14, safeDt);
 
-    for (const leg of [legFL, legFR, legBL, legBR]) {
-      leg.scale.y = THREE.MathUtils.damp(leg.scale.y, targetLegScaleY, 12, safeDt);
+    const isFrontMilkPaw = isDrinkingMilk || isHoldingMilk;
+    for (const leg of [legFL, legFR]) {
+      leg.scale.y = THREE.MathUtils.damp(
+        leg.scale.y,
+        isFrontMilkPaw ? (inBathPosture ? 0.65 : 0.92) : targetFrontLegScaleY,
+        12,
+        safeDt,
+      );
+    }
+    for (const leg of [legBL, legBR]) {
+      leg.scale.y = THREE.MathUtils.damp(
+        leg.scale.y,
+        isFrontMilkPaw && isLoaf ? 0.36 : targetBackLegScaleY,
+        12,
+        safeDt,
+      );
     }
 
     shadowMat.opacity = THREE.MathUtils.damp(
       shadowMat.opacity,
-      isSoaking ? 0.1 : 0.55,
+      inBathPosture ? 0.1 : 0.55,
       10,
       safeDt,
     );
 
-    // 2. Body vertical posture & head expression
-    const bounce = Math.abs(Math.sin(walkPhase)) * 0.025 * speedRatio;
+    // 2. Body vertical posture, cute walk waddle & head expression
+    const bounce = Math.abs(Math.sin(walkPhase)) * 0.022 * speedRatio;
     const breath = Math.sin(elapsed * 2.2) * 0.011;
     let targetRigY = bounce + breath;
-    if (isSoaking) targetRigY = -0.025 + Math.sin(elapsed * 1.4) * 0.01;
-    else if (isKnead) targetRigY = -0.04 + Math.sin(actionTime * 4.4) * 0.015;
-    else if (isLoaf) targetRigY = -0.105 + breath * 0.5;
+    if (inBathPosture) {
+      targetRigY =
+        0.09 +
+        (speedRatio > 0.04 ? bounce * 0.6 : 0) +
+        Math.sin(elapsed * 1.4) * 0.01;
+    } else if (isDrinkingMilk || isEatingEgg) targetRigY = -0.055 + breath * 0.5;
+    else if (isGroom) targetRigY = -0.018 + breath * 0.4;
+    else if (isKnead) targetRigY = -0.008 + Math.sin(actionTime * 4.4) * 0.018;
+    else if (isLoaf) targetRigY = -0.128 + breath * 0.5;
+    else if (isFootSoak) targetRigY = -0.105 + breath * 0.4;
     else if (isGreet) targetRigY = Math.sin(actionTime * 7.5) * 0.025;
 
     rig.position.y = THREE.MathUtils.damp(rig.position.y, targetRigY, 10, safeDt);
+    const targetBodyRoll =
+      !inBathPosture &&
+      !isLoaf &&
+      !isGroom &&
+      !isDrinkingMilk &&
+      !isEatingEgg &&
+      speedRatio > 0.04
+        ? Math.sin(walkPhase) * 0.065 * speedRatio
+        : 0;
+    bodyGroup.rotation.z = THREE.MathUtils.damp(bodyGroup.rotation.z, targetBodyRoll, 11, safeDt);
+
+    // Raise head upright above water surface when inside bath so face remains clearly visible
+    const targetHeadPosY = inBathPosture
+      ? 0.29
+      : isGroom || isDrinkingMilk || isEatingEgg
+        ? 0.22
+        : 0.19;
+    const targetHeadPosZ = inBathPosture
+      ? 0.18
+      : isGroom || isDrinkingMilk || isEatingEgg
+        ? 0.22
+        : 0.26;
+    headGroup.position.y = THREE.MathUtils.damp(headGroup.position.y, targetHeadPosY, 9, safeDt);
+    headGroup.position.z = THREE.MathUtils.damp(headGroup.position.z, targetHeadPosZ, 9, safeDt);
 
     let targetHeadX = Math.sin(elapsed * 1.5) * 0.03;
-    let targetHeadZ = 0;
-    if (isSoaking) targetHeadX = -0.08 + Math.sin(elapsed * 1.2) * 0.035;
-    else if (isGreet) {
+    let targetHeadZ =
+      !inBathPosture && speedRatio > 0.04 ? -Math.sin(walkPhase) * 0.055 * speedRatio : 0;
+    if (isDrinkingMilk) {
+      targetHeadX = -0.18 + Math.sin(elapsed * 9.0) * 0.06;
+    } else if (isEatingEgg) {
+      targetHeadX = -0.1 + Math.sin(elapsed * 11.0) * 0.09;
+    } else if (isGroom) {
+      const groomCycle = actionTime * 4.8;
+      targetHeadX = (inBathPosture ? 0.04 : 0.16) + Math.sin(groomCycle) * 0.11;
+      targetHeadZ = -0.18 - Math.sin(groomCycle * 0.5) * 0.06;
+    } else if (inBathPosture) {
+      targetHeadX = -0.12 + Math.sin(elapsed * 1.2) * 0.03;
+    } else if (isGreet) {
       targetHeadX = -0.14;
       targetHeadZ = Math.sin(actionTime * 5.0) * 0.14;
     } else if (isKnead) {
       targetHeadX = 0.12 + Math.sin(actionTime * 4.4) * 0.05;
+    } else if (isFootSoak) {
+      targetHeadX = 0.04 + Math.sin(elapsed * 1.35) * 0.035;
+      targetHeadZ = Math.sin(elapsed * 0.8) * 0.035;
     } else if (isLoaf) {
       targetHeadX = 0.06;
     }
 
     headGroup.rotation.x = THREE.MathUtils.damp(headGroup.rotation.x, targetHeadX, 9, safeDt);
     headGroup.rotation.z = THREE.MathUtils.damp(headGroup.rotation.z, targetHeadZ, 9, safeDt);
-    headGroup.rotation.y = Math.sin(elapsed * 0.7) * 0.05 * (1 - speedRatio * 0.6);
+    headGroup.rotation.y = isGroom
+      ? Math.sin(actionTime * 2.4) * 0.1
+      : Math.sin(elapsed * 0.7) * 0.05 * (1 - speedRatio * 0.6);
 
     // 3. Tail sway & Greet "?" curl
     const tailFreq = isGreet ? 6.5 : 2.0 + speedRatio * 2.4;
     const tailAmp = isGreet ? 0.44 : 0.28 + speedRatio * 0.16;
     tailBasePivot.rotation.y = Math.sin(elapsed * tailFreq) * tailAmp;
-    const targetTailX = isGreet ? -0.34 : isSoaking ? 0.24 : isLoaf ? 0.35 : Math.sin(elapsed * 1.3) * 0.08;
+    const targetTailX = isGreet
+      ? -0.34
+      : isSoaking || isFootSoak
+        ? 0.24
+        : isLoaf
+          ? 0.35
+          : Math.sin(elapsed * 1.3) * 0.08;
     tailBasePivot.rotation.x = THREE.MathUtils.damp(tailBasePivot.rotation.x, targetTailX, 9, safeDt);
     tailMidPivot.rotation.y = Math.sin(elapsed * tailFreq - 0.8) * 0.24;
 
-    // 4. Blinking eyes (closed gently during soak / loaf / knead)
+    // 4. Blinking eyes (keep eyes softly open during soak so the face is expressive in photos)
     blinkTimer -= safeDt;
     if (blinkTimer <= 0) {
       blinkTimer = 3.2 + ((elapsed * 13.7) % 2.4);
@@ -632,13 +994,19 @@ export function createCatAvatar(
     }
     blinkAmount = Math.max(0, blinkAmount - safeDt * 6.5);
     const targetEyeScaleY =
-      isSoaking || isLoaf
-        ? 0.2
-        : isKnead
-          ? 0.32
-          : blinkAmount > 0.15
-            ? 0.08
-            : 1.0;
+      isDrinkingMilk || isEatingEgg || isGroom
+        ? 0.22
+        : isLoaf
+          ? 0.2
+          : isKnead
+            ? 0.32
+            : blinkAmount > 0.15
+              ? 0.08
+              : isFootSoak
+                ? 0.68
+                : inBathPosture
+                  ? 0.88
+                  : 1.0;
     eyeLeftGroup.scale.y = THREE.MathUtils.damp(
       eyeLeftGroup.scale.y,
       targetEyeScaleY,
@@ -680,7 +1048,83 @@ export function createCatAvatar(
       carriedLogGroup.rotation.z = Math.sin(walkPhase) * 0.05 * speedRatio;
     }
 
-    // 7. Pink warmth aura & rising sparkle orbs after receiving a milk gift
+    const showMilkProp = isDrinkingMilk || isHoldingMilk;
+    milkBottleScale = THREE.MathUtils.damp(
+      milkBottleScale,
+      showMilkProp ? 1 : 0,
+      12,
+      safeDt,
+    );
+    heldMilkGroup.visible = milkBottleScale > 0.03;
+    heldMilkGroup.scale.setScalar(Math.max(0.01, milkBottleScale));
+    if (heldMilkGroup.visible) {
+      if (isDrinkingMilk) {
+        heldMilkGroup.position.set(
+          0,
+          (inBathPosture ? 0.21 : isLoaf ? 0.15 : 0.11) +
+            Math.sin(elapsed * 8.5) * 0.018,
+          0.51,
+        );
+        heldMilkGroup.rotation.set(
+          -0.48 + Math.sin(elapsed * 8.5) * 0.1,
+          0,
+          0,
+        );
+      } else {
+        heldMilkGroup.position.set(
+          0,
+          (inBathPosture ? 0.16 : isLoaf ? 0.09 : 0.03) +
+            Math.sin(walkPhase) * 0.015 * speedRatio,
+          0.48,
+        );
+        heldMilkGroup.rotation.set(
+          0.08 + Math.sin(walkPhase) * 0.05 * speedRatio,
+          0,
+          Math.cos(walkPhase) * 0.05 * speedRatio,
+        );
+      }
+    }
+
+    const showEggProp = isEatingEgg;
+    eggPropScale = THREE.MathUtils.damp(
+      eggPropScale,
+      showEggProp ? 1 : 0,
+      12,
+      safeDt,
+    );
+    heldEggGroup.visible = eggPropScale > 0.03;
+    heldEggGroup.scale.setScalar(Math.max(0.01, eggPropScale));
+    if (heldEggGroup.visible) {
+      heldEggGroup.position.set(
+        0,
+        (inBathPosture ? 0.2 : isLoaf ? 0.14 : 0.1) +
+          Math.sin(elapsed * 11.0) * 0.015,
+        0.49,
+      );
+      heldEggGroup.rotation.set(
+        -0.25 + Math.sin(elapsed * 11.0) * 0.08,
+        0,
+        0,
+      );
+    }
+
+    // 7. Overhead speech bubble sprite fade & gentle bob
+    if (speechTimer > 0) {
+      speechTimer = Math.max(0, speechTimer - safeDt);
+      const age = Math.max(0, speechDuration - speechTimer);
+      const popScale = age < 0.18 ? 0.72 + (age / 0.18) * 0.28 : 1.0;
+      const fadeOut = speechTimer < 0.45 ? speechTimer / 0.45 : 1.0;
+      speechSprite.visible = speechTimer > 0.01;
+      speechSprite.position.y =
+        (inBathPosture ? 0.96 : 0.86) + Math.sin(elapsed * 4.2) * 0.018;
+      speechSprite.scale.set(1.15 * popScale, 0.29 * popScale, 1);
+      speechMat.opacity = Math.max(0, Math.min(1, fadeOut));
+    } else {
+      speechSprite.visible = false;
+      speechMat.opacity = 0;
+    }
+
+    // 8. Pink warmth aura & rising sparkle orbs after receiving a milk gift
     if (pinkGiftTimer > 0) {
       pinkGiftTimer = Math.max(0, pinkGiftTimer - safeDt);
       const fade = Math.min(1, pinkGiftTimer / 1.1);
@@ -712,6 +1156,8 @@ export function createCatAvatar(
       activeCoatTexture = null;
     }
     checkeredTex.dispose();
+    speechTexture.dispose();
+    speechMat.dispose();
     root.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
         obj.geometry.dispose();
@@ -728,6 +1174,10 @@ export function createCatAvatar(
     root,
     setCoat,
     triggerGiftAfterglow,
+    setHeldMilk,
+    triggerDrinkMilk,
+    triggerEatEgg,
+    showSpeechBubble,
     update,
     dispose,
   };

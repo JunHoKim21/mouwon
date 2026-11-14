@@ -3,13 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { FormEvent, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import {
   Camera,
   ChevronDown,
   Download,
   Eye,
   EyeOff,
+  Gift,
+  HandHeart,
   MapPin,
   Moon,
   SlidersHorizontal,
@@ -24,21 +26,26 @@ import {
   ROOM_MAX_PLAYERS,
 } from './shared/multiplayerProtocol';
 import { AudioMixerSettings, DEFAULT_MIXER_SETTINGS } from './audio/onsenAudio';
-import { MilkVendingModal } from './components/MilkVendingModal';
-import { YarnBallModal } from './components/YarnBallModal';
-import { CAT_COATS, CatCoatId } from './world/catCoats';
-import { OnsenScene, OnsenSceneHandle, TimeOfDay } from './world/OnsenScene';
+import { MilkBottleIllustration } from './components/MilkVendingModal';
+import { CAT_COATS, CatCoatId, getCatCoatById } from './world/catCoats';
+import {
+  IncomingMilkOfferEvent,
+  IncomingMilkRequestEvent,
+  MilkSocialTargetInfo,
+  OnsenScene,
+  OnsenSceneHandle,
+  TimeOfDay,
+} from './world/OnsenScene';
 import { TELEPORT_SPOTS, WorldZoneId } from './world/terrainMath';
 import {
   CatActionMode,
   INITIAL_WISH_YUZUS,
-  MILK_VENDING_UNLOCK_KNEADS,
+  MILK_DRINK_OPTIONS,
+  MILK_SOCIAL_MESSAGES,
   MilkDrinkOption,
   NearbyInteractPrompt,
-  PENTATONIC_BAMBOO_NOTES,
   YUZU_WISH_COLORS,
   WishYuzuItem,
-  YARN_MAX_COUNT,
   clampWishMessage,
 } from './world/ritualMath';
 
@@ -51,17 +58,25 @@ export default function App() {
   const [currentZone, setCurrentZone] = useState<WorldZoneId>('entrance');
   const [walkingTargetLabel, setWalkingTargetLabel] = useState<string | null>(null);
   const [teleportOpen, setTeleportOpen] = useState(false);
+  const [coatMenuOpen, setCoatMenuOpen] = useState(false);
   const [trainActive, setTrainActive] = useState(false);
-  const [xylophoneOpen, setXylophoneOpen] = useState(false);
 
-  // Yarn 100 Counter modal state
-  const [yarnOpen, setYarnOpen] = useState(false);
-  const [yarnCount, setYarnCount] = useState(0);
-
-  // Milk vending & knead cumulative counter
+  // Milk vending quick-bar state
   const [milkModalOpen, setMilkModalOpen] = useState(false);
-  const [kneadCount, setKneadCount] = useState(0);
-  const [carryingFirewood, setCarryingFirewood] = useState(false);
+  const [uiIdle, setUiIdle] = useState(false);
+  const [heldMilk, setHeldMilk] = useState<MilkDrinkOption | null>(null);
+  const [socialTargets, setSocialTargets] = useState<{
+    nearbyGiveTarget: MilkSocialTargetInfo | null;
+    nearbyVendingTarget: MilkSocialTargetInfo | null;
+  }>({
+    nearbyGiveTarget: null,
+    nearbyVendingTarget: null,
+  });
+  const [incomingOffer, setIncomingOffer] = useState<IncomingMilkOfferEvent | null>(
+    null,
+  );
+  const [incomingRequest, setIncomingRequest] =
+    useState<IncomingMilkRequestEvent | null>(null);
   const [nearbyPrompt, setNearbyPrompt] = useState<NearbyInteractPrompt | null>(null);
   const [hideRemoteCats, setHideRemoteCats] = useState(false);
   const [roomStatus, setRoomStatus] = useState<MultiplayerRoomStatus>({
@@ -104,6 +119,7 @@ export default function App() {
 
   const currentZoneLabel =
     TELEPORT_SPOTS.find((spot) => spot.zoneId === currentZone)?.label ?? '묘유원 정원';
+  const activeCoat = getCatCoatById(coatId);
 
   const isNight = timeOfDay === 'night';
 
@@ -174,27 +190,150 @@ export default function App() {
     }
   };
 
-  const handlePullSelfMilk = (drink: MilkDrinkOption) => {
-    sceneRef.current?.playVendingDrop();
+  const handlePullHoldMilk = (drink: MilkDrinkOption) => {
+    setHeldMilk(drink);
+    sceneRef.current?.holdMilk(drink);
     setMilkModalOpen(false);
-    showToast(`따뜻한 ${drink.label}를 뽑아 홀짝 마셨어요!`);
+    showToast(
+      `따뜻한 ${drink.label}를 뽑아 두 앞발로 꼭 들었어요! 걸어가며 다른 고양이를 만나면 건넬 수 있어요 🥛✨`,
+    );
   };
 
-  const handleGiftNpcMilk = (drink: MilkDrinkOption) => {
-    const npcName = sceneRef.current?.giftMilkToNearestNpc(drink.label);
+  const handleDrinkHeldMilk = () => {
+    if (!heldMilk) return;
+    const drink = heldMilk;
+    sceneRef.current?.drinkHeldMilk();
+    setHeldMilk(null);
+    showToast(
+      `따뜻한 ${drink.label}를 두 앞발로 잡고 홀짝 마셨어요! 분홍빛 온기가 피어오릅니다 🥛💕`,
+    );
+  };
+
+  const handleDropHeldMilk = () => {
+    sceneRef.current?.holdMilk(null);
+    setHeldMilk(null);
+    showToast('들고 있던 병우유를 벤치 바구니에 조심스레 내려놓았어요.');
+  };
+
+  const handleOfferMilkToNearby = () => {
+    sceneRef.current?.offerHeldMilkToTarget(
+      socialTargets.nearbyGiveTarget ?? undefined,
+    );
+  };
+
+  const handleRequestMilkFromPeer = (
+    drink: MilkDrinkOption = MILK_DRINK_OPTIONS[0],
+  ) => {
     setMilkModalOpen(false);
-    if (npcName) {
+    sceneRef.current?.requestMilkFromTarget(
+      drink.id,
+      socialTargets.nearbyVendingTarget ?? undefined,
+    );
+  };
+
+  const handleRespondMilkOffer = (accepted: boolean) => {
+    if (!incomingOffer) return;
+    sceneRef.current?.respondMilkOffer(
+      incomingOffer.fromPeerId,
+      incomingOffer.drink.id,
+      accepted,
+      incomingOffer.isNpc,
+    );
+    if (accepted) {
       showToast(
-        `'${npcName}' 고양이에게 따뜻한 ${drink.label}를 선물했어요! 분홍빛 온기가 피어오릅니다`,
+        MILK_SOCIAL_MESSAGES.acceptReceiverToast(
+          incomingOffer.senderName,
+          incomingOffer.drink.label,
+        ),
       );
-    } else {
-      showToast(`따뜻한 ${drink.label} 온기를 전했어요!`);
     }
+    setIncomingOffer(null);
   };
 
-  const showPolaroidAction = actionMode === 'soak' || actionMode === 'sitBench';
-  const showContextBar =
-    showPolaroidAction || trainActive || carryingFirewood || nearbyPrompt !== null;
+  const handleRespondMilkRequest = (accepted: boolean) => {
+    if (!incomingRequest) return;
+    sceneRef.current?.respondMilkRequest(
+      incomingRequest.fromPeerId,
+      incomingRequest.drink.id,
+      accepted,
+    );
+    setIncomingRequest(null);
+  };
+
+  const wasNearMilkVendingRef = useRef(false);
+
+  useEffect(() => {
+    const isNearMilkNow = nearbyPrompt?.kind === 'milk_vending';
+    if (isNearMilkNow && !wasNearMilkVendingRef.current && heldMilk === null) {
+      setMilkModalOpen(true);
+    } else if (!isNearMilkNow && wasNearMilkVendingRef.current) {
+      setMilkModalOpen(false);
+    }
+    wasNearMilkVendingRef.current = isNearMilkNow;
+  }, [nearbyPrompt, heldMilk]);
+
+  useEffect(() => {
+    setUiIdle(false);
+  }, [nearbyPrompt, currentZone]);
+
+  useEffect(() => {
+    let timerId: number | null = null;
+    const scheduleFade = () => {
+      if (timerId !== null) window.clearTimeout(timerId);
+      timerId = window.setTimeout(() => {
+        setUiIdle(true);
+      }, 4500);
+    };
+    const handleActivity = (evt?: Event) => {
+      if (evt instanceof KeyboardEvent && evt.key === 'Escape') {
+        setMilkModalOpen(false);
+        setCoatMenuOpen(false);
+        setTeleportOpen(false);
+        setMixerOpen(false);
+      }
+      setUiIdle(false);
+      scheduleFade();
+    };
+    scheduleFade();
+    const events: Array<keyof WindowEventMap> = [
+      'pointermove',
+      'pointerdown',
+      'keydown',
+      'wheel',
+      'touchstart',
+    ];
+    for (const evt of events) {
+      window.addEventListener(evt, handleActivity, { passive: true });
+    }
+    return () => {
+      if (timerId !== null) window.clearTimeout(timerId);
+      for (const evt of events) {
+        window.removeEventListener(evt, handleActivity);
+      }
+    };
+  }, []);
+
+  const isAnyOverlayOpen =
+    composerOpen ||
+    readingWish !== null ||
+    milkModalOpen ||
+    polaroidUrl !== null ||
+    incomingOffer !== null ||
+    incomingRequest !== null ||
+    teleportOpen ||
+    mixerOpen ||
+    coatMenuOpen ||
+    heldMilk !== null ||
+    nearbyPrompt !== null ||
+    walkingTargetLabel !== null;
+  const shouldFadeUi = uiIdle && !isAnyOverlayOpen;
+
+  const showContextBar = heldMilk === null && !milkModalOpen && nearbyPrompt !== null;
+  const isRestingPose =
+    actionMode === 'footSoak' ||
+    actionMode === 'sitBench' ||
+    actionMode === 'knead' ||
+    actionMode === 'loaf';
 
   return (
     <div className="relative w-screen h-dvh overflow-hidden">
@@ -206,6 +345,7 @@ export default function App() {
         mixerSettings={mixer}
         trainActive={trainActive}
         hideRemoteCats={hideRemoteCats}
+        heldMilk={heldMilk}
         onActionModeChange={setActionMode}
         onZoneChange={setCurrentZone}
         onWalkingTargetChange={setWalkingTargetLabel}
@@ -219,35 +359,113 @@ export default function App() {
         onOpenMilkVending={() => {
           setTeleportOpen(false);
           setMixerOpen(false);
+          setCoatMenuOpen(false);
           setMilkModalOpen(true);
         }}
-        onIncrementKneadCount={() => setKneadCount((prev) => prev + 1)}
-        onCarryingChange={setCarryingFirewood}
+        onHeldMilkChange={setHeldMilk}
+        onSocialTargetsChange={setSocialTargets}
+        onIncomingMilkOffer={setIncomingOffer}
+        onIncomingMilkRequest={setIncomingRequest}
         onNearbyInteractChange={setNearbyPrompt}
         onShowToast={showToast}
-        onToggleXylophone={() => setXylophoneOpen((prev) => !prev)}
-        onToggleYarnModal={() => setYarnOpen((prev) => !prev)}
         onMultiplayerStatusChange={setRoomStatus}
         onRoomSnapshotWishes={handleRoomSnapshotWishes}
         onRemoteWishReceived={handleRemoteWishReceived}
       />
 
-      {/* Top Floating Bar: Brand Title (Left) + Teleport Menu, Sound Mixer & Day/Night (Right) */}
-      <header className="pointer-events-none fixed inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-1.5 px-2 py-2 sm:flex-nowrap sm:items-start sm:gap-2 sm:px-6 sm:py-4">
+      {/* Top Floating Bar: Brand Title + Coat Dropdown (Left) + Teleport, Photo, Sound & Day/Night (Right) */}
+      <header
+        className={`pointer-events-none fixed inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-1.5 px-2 py-2 sm:flex-nowrap sm:items-start sm:gap-2 sm:px-6 sm:py-4 transition-opacity duration-700 ${
+          shouldFadeUi ? 'opacity-0 [&_*]:!pointer-events-none' : 'opacity-100'
+        }`}
+      >
         <div className="pointer-events-auto flex items-center gap-1 sm:gap-1.5 min-w-0">
           <div
-            className={`flex items-baseline gap-2.5 rounded-xl px-2.5 py-1.5 sm:px-3.5 sm:py-2 border shrink-0 ${surfaceCls}`}
+            className={`flex items-baseline gap-2 rounded-xl px-2.5 py-1.5 sm:px-3.5 sm:py-2 border shrink-0 ${surfaceCls}`}
           >
             <h1 className="text-xs sm:text-base font-semibold tracking-tight whitespace-nowrap">
               묘유원
             </h1>
             <span
-              className={`hidden sm:inline text-xs whitespace-nowrap ${
+              className={`hidden md:inline text-xs whitespace-nowrap ${
                 isNight ? 'text-[#d8cbb6]/75' : 'text-[#5a4e40]/75'
               }`}
             >
               고양이 온천 여관
             </span>
+          </div>
+
+          <div className="relative">
+            <button
+              type="button"
+              data-testid="coat-menu-btn"
+              onClick={() => {
+                setTeleportOpen(false);
+                setMixerOpen(false);
+                setCoatMenuOpen((prev) => !prev);
+              }}
+              aria-expanded={coatMenuOpen}
+              aria-haspopup="menu"
+              aria-label={`고양이 털 무늬 선택 (${activeCoat.name})`}
+              title={`고양이 털 무늬: ${activeCoat.name}`}
+              className={`flex items-center gap-1.5 rounded-xl px-2 py-1.5 sm:px-2.5 sm:py-2 text-[11px] sm:text-xs font-medium border whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d9842b] ${surfaceCls}`}
+            >
+              <span
+                aria-hidden="true"
+                className="w-3 h-3 rounded-full border border-black/20 shrink-0"
+                style={{ background: activeCoat.swatchGradient }}
+              />
+              <span className="hidden sm:inline">{activeCoat.name}</span>
+              <ChevronDown
+                className={`w-3 h-3 opacity-75 shrink-0 transition-transform ${
+                  coatMenuOpen ? 'rotate-180' : ''
+                }`}
+                aria-hidden="true"
+              />
+            </button>
+
+            {coatMenuOpen && (
+              <div
+                role="menu"
+                aria-label="고양이 털 무늬 선택"
+                className={`absolute left-0 top-11 sm:top-12 w-40 rounded-2xl p-1.5 border shadow-xl z-30 ${surfaceCls}`}
+              >
+                <div className="px-2.5 py-1 text-[11px] font-semibold opacity-70">
+                  🐱 털 무늬 선택
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  {CAT_COATS.map((coat) => {
+                    const active = coat.id === coatId;
+                    return (
+                      <button
+                        key={coat.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={active}
+                        onClick={() => {
+                          setCoatId(coat.id);
+                          setCoatMenuOpen(false);
+                        }}
+                        className={`flex items-center gap-2 w-full rounded-xl px-2.5 py-1.5 text-left text-xs font-medium cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
+                          active
+                            ? 'bg-[#d9842b] text-white'
+                            : isNight
+                              ? 'text-[#f4eee3] hover:bg-white/10'
+                              : 'text-[#2c251d] hover:bg-black/6'
+                        }`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="w-3 h-3 rounded-full border border-black/20 shrink-0"
+                          style={{ background: coat.swatchGradient }}
+                        />
+                        <span>{coat.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div
@@ -313,6 +531,7 @@ export default function App() {
               type="button"
               onClick={() => {
                 setMixerOpen(false);
+                setCoatMenuOpen(false);
                 setTeleportOpen((prev) => !prev);
               }}
               aria-expanded={teleportOpen}
@@ -374,8 +593,21 @@ export default function App() {
 
           <button
             type="button"
+            data-testid="capture-polaroid-btn"
+            onClick={handleCapturePolaroid}
+            aria-label="추억 사진 저장"
+            title="추억 사진 저장"
+            className={`flex items-center gap-1 rounded-xl px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-medium border whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d9842b] ${surfaceCls}`}
+          >
+            <Camera className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#d9842b] shrink-0" aria-hidden="true" />
+            <span className="hidden sm:inline">사진</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => {
               setTeleportOpen(false);
+              setCoatMenuOpen(false);
               setMixerOpen((prev) => !prev);
             }}
             aria-expanded={mixerOpen}
@@ -663,32 +895,112 @@ export default function App() {
         </div>
       )}
 
-      {/* Milk Vending Machine Modal (strictly unmounted when closed) */}
-      {milkModalOpen && (
-        <MilkVendingModal
-          isNight={isNight}
-          kneadCount={kneadCount}
-          onPullSelfMilk={handlePullSelfMilk}
-          onGiftNpcMilk={handleGiftNpcMilk}
-          onClose={() => setMilkModalOpen(false)}
-        />
+      {/* Non-blocking Floating Card: Incoming Milk Gift Offer Approval / Decline */}
+      {incomingOffer && (
+        <div
+          role="dialog"
+          aria-modal="false"
+          aria-label="우유 선물 도착"
+          className="fixed inset-x-0 bottom-20 z-50 flex justify-center px-3 pointer-events-none"
+        >
+          <div
+            className={`pointer-events-auto w-full max-w-sm rounded-2xl p-3.5 sm:p-4 border shadow-2xl ${surfaceCls}`}
+          >
+            <div className="flex items-center gap-3 mb-2.5">
+              <MilkBottleIllustration drink={incomingOffer.drink} size="md" />
+              <div className="min-w-0">
+                <span className="inline-block rounded-full bg-[#fce8ef] text-[#7a2846] px-2 py-0.5 text-[10px] font-semibold mb-0.5">
+                  따뜻한 병우유 선물
+                </span>
+                <h2 className="text-sm font-semibold leading-snug truncate">
+                  {incomingOffer.senderName}의 {incomingOffer.drink.label}
+                </h2>
+              </div>
+            </div>
+            <p className="text-xs leading-relaxed opacity-85 mb-3">
+              {MILK_SOCIAL_MESSAGES.offerPrompt(
+                incomingOffer.senderName,
+                incomingOffer.drink.label,
+              )}
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                data-testid="accept-milk-offer-btn"
+                onClick={() => handleRespondMilkOffer(true)}
+                className="flex-1 rounded-xl px-3 py-2 text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] cursor-pointer transition-colors"
+              >
+                😻 고맙다냥! 마시기
+              </button>
+              <button
+                type="button"
+                data-testid="decline-milk-offer-btn"
+                onClick={() => handleRespondMilkOffer(false)}
+                className={`rounded-xl px-3 py-2 text-xs font-medium border cursor-pointer transition-colors ${
+                  isNight
+                    ? 'border-white/15 hover:bg-white/10'
+                    : 'border-[#2c251d]/15 hover:bg-black/5'
+                }`}
+              >
+                😿 마음만 받기
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* 100 Yarn Ball Counter Modal (strictly unmounted when closed) */}
-      {yarnOpen && (
-        <YarnBallModal
-          isNight={isNight}
-          count={yarnCount}
-          onIncrement={() => {
-            setYarnCount((prev) => {
-              const next = Math.min(YARN_MAX_COUNT, prev + 1);
-              sceneRef.current?.playYarnTick(next);
-              return next;
-            });
-          }}
-          onReset={() => setYarnCount(0)}
-          onClose={() => setYarnOpen(false)}
-        />
+      {/* Non-blocking Floating Card: Incoming Milk Request (Near Vending Machine) */}
+      {incomingRequest && (
+        <div
+          role="dialog"
+          aria-modal="false"
+          aria-label="우유 요청 도착"
+          className="fixed inset-x-0 bottom-20 z-50 flex justify-center px-3 pointer-events-none"
+        >
+          <div
+            className={`pointer-events-auto w-full max-w-sm rounded-2xl p-3.5 sm:p-4 border shadow-2xl ${surfaceCls}`}
+          >
+            <div className="flex items-center gap-3 mb-2.5">
+              <MilkBottleIllustration drink={incomingRequest.drink} size="md" />
+              <div className="min-w-0">
+                <span className="inline-block rounded-full bg-[#eaf2fc] text-[#1f4268] px-2 py-0.5 text-[10px] font-semibold mb-0.5">
+                  자판기 앞 요청 🥺
+                </span>
+                <h2 className="text-sm font-semibold leading-snug truncate">
+                  {incomingRequest.requesterName}의 {incomingRequest.drink.label} 부탁
+                </h2>
+              </div>
+            </div>
+            <p className="text-xs leading-relaxed opacity-85 mb-3">
+              {MILK_SOCIAL_MESSAGES.requestPrompt(
+                incomingRequest.requesterName,
+                incomingRequest.drink.label,
+              )}
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                data-testid="accept-milk-request-btn"
+                onClick={() => handleRespondMilkRequest(true)}
+                className="flex-1 rounded-xl px-3 py-2 text-xs font-semibold bg-[#4f77a8] text-white hover:bg-[#3f6493] cursor-pointer transition-colors"
+              >
+                🍼 뽑아서 건네기
+              </button>
+              <button
+                type="button"
+                data-testid="decline-milk-request-btn"
+                onClick={() => handleRespondMilkRequest(false)}
+                className={`rounded-xl px-3 py-2 text-xs font-medium border cursor-pointer transition-colors ${
+                  isNight
+                    ? 'border-white/15 hover:bg-white/10'
+                    : 'border-[#2c251d]/15 hover:bg-black/5'
+                }`}
+              >
+                🌰 다음에 사주기
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Memory Photo Preview Modal (strictly unmounted when closed) */}
@@ -737,93 +1049,167 @@ export default function App() {
         </div>
       )}
 
-      {/* Bottom Floating Stack: Context Status/Capture Bar + Xylophone + Action Dock + 6-Coat Switcher */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-2 sm:bottom-4 pb-[env(safe-area-inset-bottom)] z-20 flex flex-col items-center gap-1.5 sm:gap-2 px-2 sm:px-3">
-        {showContextBar && (
+      {/* Bottom Floating Stack: Quick Milk Bar / Held Milk / Nearby Action Pill + Slim Action Dock */}
+      <div
+        className={`pointer-events-none fixed inset-x-0 bottom-3 sm:bottom-5 pb-[env(safe-area-inset-bottom)] z-20 flex flex-col items-center gap-1.5 px-2 sm:px-3 transition-opacity duration-700 ${
+          shouldFadeUi ? 'opacity-0 [&_*]:!pointer-events-none' : 'opacity-100'
+        }`}
+      >
+        {milkModalOpen && (
           <div
-            data-testid="context-status-bar"
-            className={`pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 rounded-xl px-2.5 py-1.5 sm:px-3 border shadow-md max-w-full ${surfaceCls}`}
+            data-testid="milk-quick-bar"
+            role="region"
+            aria-label="병우유 원터치 뽑기"
+            className={`pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-2xl px-2.5 py-1.5 border shadow-lg max-w-full ${surfaceCls}`}
           >
-            {nearbyPrompt && (
+            <span className="text-[11px] sm:text-xs font-semibold px-1.5 whitespace-nowrap">
+              🥛 따뜻한 병우유 자판기
+            </span>
+            {MILK_DRINK_OPTIONS.map((drink, idx) => (
               <button
+                key={drink.id}
                 type="button"
-                data-testid="nearby-interact-btn"
-                onClick={() => sceneRef.current?.triggerInteraction(nearbyPrompt.kind)}
-                title={nearbyPrompt.hint}
-                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] sm:text-xs font-semibold cursor-pointer whitespace-nowrap shadow-sm transition-colors ${
+                data-testid={idx === 0 ? 'pull-self-milk-btn' : `pull-milk-${drink.id}-btn`}
+                onClick={() => handlePullHoldMilk(drink)}
+                className={`flex items-center gap-1 rounded-xl px-2 py-0.5 text-[11px] sm:text-xs font-medium cursor-pointer whitespace-nowrap transition-colors ${
                   isNight
-                    ? 'bg-[#ff9e3b] text-[#1a2030] hover:bg-[#ffb15c]'
-                    : 'bg-[#5c4328] text-[#fcfaf5] hover:bg-[#49341e]'
+                    ? 'hover:bg-[#ff9e3b]/25 text-[#ffe8c8]'
+                    : 'hover:bg-[#f6e4c8] text-[#2c251d]'
                 }`}
               >
-                <span>
-                  {nearbyPrompt.kind === 'milk_vending'
-                    ? `${nearbyPrompt.label} (${Math.min(kneadCount, MILK_VENDING_UNLOCK_KNEADS)}/${MILK_VENDING_UNLOCK_KNEADS})`
-                    : nearbyPrompt.label}
-                </span>
-                <span className="hidden sm:inline opacity-80 text-[11px]">(F)</span>
-              </button>
-            )}
-
-            {actionMode === 'sitBench' && (
-              <button
-                type="button"
-                onClick={() => sceneRef.current?.standUp()}
-                className="text-[11px] sm:text-xs font-medium hover:underline cursor-pointer text-center sm:whitespace-nowrap"
-              >
-                오목눈이와 휴식 중 · 일어나기 <span className="hidden sm:inline">(ESC)</span>
-              </button>
-            )}
-
-            {showPolaroidAction && (
-              <button
-                type="button"
-                onClick={handleCapturePolaroid}
-                className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] sm:text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] cursor-pointer whitespace-nowrap"
-              >
-                <Camera className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>📸 추억 사진 저장</span>
-              </button>
-            )}
-
-            {carryingFirewood && nearbyPrompt?.kind !== 'firewood_furnace' && (
-              <span className="text-[11px] sm:text-xs font-medium opacity-90 text-center sm:whitespace-nowrap">
-                🪵 장작 운반 중 · 아궁이 장작터로 가져가 불을 지펴주세요
-              </span>
-            )}
-
-            {trainActive && (
-              <span className="text-[11px] sm:text-xs font-medium opacity-90 text-center sm:whitespace-nowrap">
-                산책 동행 중 · 최대 2마리만 차분하게 따라와요
-              </span>
-            )}
-          </div>
-        )}
-
-        {xylophoneOpen && (
-          <div
-            role="group"
-            aria-label="대나무 실로폰 음계"
-            className={`pointer-events-auto flex items-center gap-1 rounded-xl p-1 border shadow-md overflow-x-auto max-w-full ${surfaceCls}`}
-          >
-            {PENTATONIC_BAMBOO_NOTES.map((note, idx) => (
-              <button
-                key={note.key}
-                type="button"
-                onClick={() => sceneRef.current?.playBambooNote(idx)}
-                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
-                  isNight
-                    ? 'hover:bg-[#ff9e3b]/25 text-[#ffe6c4]'
-                    : 'hover:bg-[#5c4328]/12 text-[#3c3329]'
-                }`}
-              >
-                {note.key} {note.label}
+                <MilkBottleIllustration drink={drink} size="sm" />
+                <span>{drink.label}</span>
               </button>
             ))}
+            {socialTargets.nearbyVendingTarget && (
+              <button
+                type="button"
+                data-testid="request-milk-vending-btn"
+                onClick={() => handleRequestMilkFromPeer(MILK_DRINK_OPTIONS[0])}
+                className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] sm:text-xs font-semibold cursor-pointer whitespace-nowrap shadow-sm transition-colors ${
+                  isNight
+                    ? 'bg-[#4f77a8] text-white hover:bg-[#6189ba]'
+                    : 'bg-[#356396] text-white hover:bg-[#2a507a]'
+                }`}
+              >
+                <HandHeart className="w-3 h-3" aria-hidden="true" />
+                <span>🥺 {socialTargets.nearbyVendingTarget.name}에게 조르기</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setMilkModalOpen(false)}
+              aria-label="우유 자판기 닫기"
+              className="rounded-full p-1 opacity-65 hover:opacity-100 cursor-pointer shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+        {heldMilk && (
+          <div
+            data-testid="held-milk-banner"
+            className={`pointer-events-auto flex items-center gap-2 rounded-full px-3 py-1 border shadow-lg max-w-full ${surfaceCls}`}
+          >
+            <MilkBottleIllustration drink={heldMilk} size="sm" />
+            <span className="text-xs font-semibold whitespace-nowrap">
+              {heldMilk.label}
+            </span>
+            {socialTargets.nearbyGiveTarget && (
+              <button
+                type="button"
+                data-testid="give-held-milk-btn"
+                onClick={handleOfferMilkToNearby}
+                className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] sm:text-xs font-semibold bg-[#e0608a] text-white hover:bg-[#c94e76] cursor-pointer whitespace-nowrap shadow-sm"
+              >
+                <Gift className="w-3 h-3" aria-hidden="true" />
+                <span>{socialTargets.nearbyGiveTarget.name}에게 주기</span>
+              </button>
+            )}
+            <button
+              type="button"
+              data-testid="drink-held-milk-btn"
+              onClick={handleDrinkHeldMilk}
+              className="rounded-full px-2.5 py-1 text-[11px] sm:text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] cursor-pointer whitespace-nowrap shadow-sm"
+            >
+              😋 마시기
+            </button>
+            <button
+              type="button"
+              onClick={handleDropHeldMilk}
+              aria-label="들고 있는 우유 내려놓기"
+              title="내려놓기"
+              className="rounded-full p-1 opacity-65 hover:opacity-100 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
 
-        {/* Action Dock (4th button = 🧶 털실 굴리기) */}
+        {showContextBar && nearbyPrompt && (
+          <div
+            data-testid="context-status-bar"
+            className={`pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-full px-2 py-1 border shadow-md max-w-full ${surfaceCls}`}
+          >
+            <button
+              type="button"
+              data-testid="nearby-interact-btn"
+              onClick={() => sceneRef.current?.triggerInteraction(nearbyPrompt.kind)}
+              title={nearbyPrompt.hint}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] sm:text-xs font-semibold cursor-pointer whitespace-nowrap shadow-sm transition-colors ${
+                isNight
+                  ? 'bg-[#ff9e3b] text-[#1a2030] hover:bg-[#ffb15c]'
+                  : 'bg-[#5c4328] text-[#fcfaf5] hover:bg-[#49341e]'
+              }`}
+            >
+              <kbd
+                className={`hidden sm:inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+                  isNight ? 'bg-black/20 text-[#1a2030]' : 'bg-white/20 text-white'
+                }`}
+              >
+                F
+              </kbd>
+              <span>{nearbyPrompt.label}</span>
+            </button>
+            {nearbyPrompt.kind === 'milk_vending' &&
+              socialTargets.nearbyVendingTarget && (
+                <button
+                  type="button"
+                  data-testid="context-request-milk-btn"
+                  onClick={() => handleRequestMilkFromPeer()}
+                  className={`flex items-center gap-1 rounded-full px-3 py-1 text-[11px] sm:text-xs font-semibold cursor-pointer whitespace-nowrap shadow-sm transition-colors ${
+                    isNight
+                      ? 'bg-[#4f77a8] text-white hover:bg-[#6189ba]'
+                      : 'bg-[#356396] text-white hover:bg-[#2a507a]'
+                  }`}
+                >
+                  <HandHeart className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>
+                    🥺 {socialTargets.nearbyVendingTarget.name}에게 우유 요청하기
+                  </span>
+                </button>
+              )}
+          </div>
+        )}
+
+        {!showContextBar && isRestingPose && !milkModalOpen && (
+          <button
+            type="button"
+            onClick={() => sceneRef.current?.standUp()}
+            className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] sm:text-xs font-medium border shadow-sm cursor-pointer transition-colors ${surfaceCls}`}
+          >
+            <kbd
+              className={`hidden sm:inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                isNight ? 'bg-white/15 text-[#f4eee3]' : 'bg-[#2c251d]/10 text-[#2c251d]'
+              }`}
+            >
+              WASD · Esc
+            </kbd>
+            <span>일어서기</span>
+          </button>
+        )}
+
+        {/* Slim Action Dock: 5 Core Actions */}
         <div
           role="group"
           aria-label="고양이 행동 선택"
@@ -831,6 +1217,7 @@ export default function App() {
         >
           <button
             type="button"
+            title="코 인사 (G)"
             onClick={() => sceneRef.current?.triggerGreet()}
             aria-pressed={actionMode === 'greet'}
             className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
@@ -841,12 +1228,30 @@ export default function App() {
                   : 'text-[#2c251d] hover:bg-black/6'
             }`}
           >
-            🐾 코 인사 <span className="hidden sm:inline">(G)</span>
+            🐾 코 인사
+            <kbd className="hidden sm:inline-block ml-1 text-[10px] opacity-60 font-sans">G</kbd>
+          </button>
+          <button
+            type="button"
+            onClick={() => sceneRef.current?.triggerGroom()}
+            aria-pressed={actionMode === 'groom'}
+            title="세수/그루밍 (R)"
+            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
+              actionMode === 'groom'
+                ? 'bg-[#d9842b] text-white'
+                : isNight
+                  ? 'text-[#f4eee3] hover:bg-white/10'
+                  : 'text-[#2c251d] hover:bg-black/6'
+            }`}
+          >
+            🧼 그루밍
+            <kbd className="hidden sm:inline-block ml-1 text-[10px] opacity-60 font-sans">R</kbd>
           </button>
           <button
             type="button"
             onClick={() => sceneRef.current?.triggerKneadOrLoaf()}
             aria-pressed={actionMode === 'knead' || actionMode === 'loaf'}
+            title="꾹꾹이/식빵 (B)"
             className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
               actionMode === 'knead' || actionMode === 'loaf'
                 ? 'bg-[#d9842b] text-white'
@@ -855,10 +1260,12 @@ export default function App() {
                   : 'text-[#2c251d] hover:bg-black/6'
             }`}
           >
-            🍞 꾹꾹이/식빵 <span className="hidden sm:inline">(B)</span>
+            🍞 꾹꾹이
+            <kbd className="hidden sm:inline-block ml-1 text-[10px] opacity-60 font-sans">B</kbd>
           </button>
           <button
             type="button"
+            title="노천탕 입욕 (E)"
             onClick={() => sceneRef.current?.triggerBathSoak()}
             aria-pressed={actionMode === 'soak'}
             className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
@@ -869,24 +1276,12 @@ export default function App() {
                   : 'text-[#2c251d] hover:bg-black/6'
             }`}
           >
-            ♨️ 노천탕 입욕 <span className="hidden sm:inline">(E)</span>
+            ♨️ 입욕
+            <kbd className="hidden sm:inline-block ml-1 text-[10px] opacity-60 font-sans">E</kbd>
           </button>
           <button
             type="button"
-            onClick={() => setYarnOpen((prev) => !prev)}
-            aria-pressed={yarnOpen}
-            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
-              yarnOpen
-                ? 'bg-[#d9842b] text-white'
-                : isNight
-                  ? 'text-[#f4eee3] hover:bg-white/10'
-                  : 'text-[#2c251d] hover:bg-black/6'
-            }`}
-          >
-            🧶 털실 굴리기
-          </button>
-          <button
-            type="button"
+            title="산책 동행 (T)"
             onClick={() => sceneRef.current?.toggleWalkTrain()}
             aria-pressed={trainActive}
             className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
@@ -897,61 +1292,10 @@ export default function App() {
                   : 'text-[#2c251d] hover:bg-black/6'
             }`}
           >
-            🐈 산책 동행 <span className="hidden sm:inline">(T)</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setXylophoneOpen((prev) => !prev);
-              sceneRef.current?.playBambooNote(Math.floor(Math.random() * 5));
-            }}
-            aria-pressed={xylophoneOpen}
-            className={`rounded-xl px-2.5 py-1.5 text-[11px] sm:text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#d9842b] ${
-              xylophoneOpen
-                ? 'bg-[#d9842b] text-white'
-                : isNight
-                  ? 'text-[#f4eee3] hover:bg-white/10'
-                  : 'text-[#2c251d] hover:bg-black/6'
-            }`}
-          >
-            🎋 실로폰 <span className="hidden sm:inline">(M)</span>
+            🐈 산책
+            <kbd className="hidden sm:inline-block ml-1 text-[10px] opacity-60 font-sans">T</kbd>
           </button>
         </div>
-
-        {/* 6-Coat Switcher */}
-        <nav
-          aria-label="고양이 털 무늬 선택"
-          className={`pointer-events-auto flex items-center justify-start sm:justify-center gap-1 rounded-2xl p-1 border shadow-md overflow-x-auto max-w-full ${surfaceCls}`}
-        >
-          {CAT_COATS.map((coat) => {
-            const active = coat.id === coatId;
-            return (
-              <button
-                key={coat.id}
-                type="button"
-                onClick={() => setCoatId(coat.id)}
-                aria-pressed={active}
-                aria-label={`${coat.name} 선택`}
-                className={`flex items-center gap-1.5 rounded-xl px-2 py-1 text-[11px] font-medium whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 ${
-                  active
-                    ? isNight
-                      ? 'bg-[#ff9e3b]/25 text-[#ffe5c2] ring-1 ring-[#ff9e3b]/60'
-                      : 'bg-[#5c4328] text-[#fcfaf5]'
-                    : isNight
-                      ? 'text-[#f4eee3] hover:bg-white/10'
-                      : 'text-[#2c251d] hover:bg-[#2c251d]/8'
-                }`}
-              >
-                <span
-                  aria-hidden="true"
-                  className="w-3 h-3 rounded-full border border-black/20 shrink-0"
-                  style={{ background: coat.swatchGradient }}
-                />
-                <span>{coat.name}</span>
-              </button>
-            );
-          })}
-        </nav>
       </div>
     </div>
   );

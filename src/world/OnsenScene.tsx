@@ -30,19 +30,31 @@ import {
   ACTION_SPOTS,
   CatActionMode,
   GREET_DURATION,
+  GROOM_DURATION,
   KNEAD_LOOP_DURATION,
+  MILK_DRINK_OPTIONS,
+  MILK_SOCIAL_MESSAGES,
+  MilkDrinkId,
+  MilkDrinkOption,
   NearbyInteractKind,
   NearbyInteractPrompt,
   SOAK_YUZU_DELAY,
   WishYuzuItem,
+  computeForestWindGain,
   computePurrProximity,
   computeWaterGain,
   detectFootstepSurface,
   findNearbyInteractPrompt,
+  getMilkDrinkById,
+  isNearMilkVending,
 } from './ritualMath';
 import { findWorldPath } from './pathfinding';
 import {
   CAMERA_DEFAULTS,
+  FOOTBATH_DECK_HEIGHT,
+  FOOTBATH_SEAT_SPOTS,
+  LANDMARKS,
+  MYOYEONGAK_CUSHION_SPOTS,
   TELEPORT_SPOTS,
   Vec2,
   WorldZoneId,
@@ -50,6 +62,8 @@ import {
   computeWorldMoveFromInput,
   detectZone,
   exponentialDampingAlpha,
+  findNearestEmptyCushion,
+  findNearestEmptyFootbathSeat,
   groundHeightAt,
   isInsideMainBath,
   resolvePlayerCollisions,
@@ -57,13 +71,50 @@ import {
 
 export type TimeOfDay = 'day' | 'night';
 
+export interface MilkSocialTargetInfo {
+  kind: 'remote' | 'npc';
+  id: string;
+  name: string;
+}
+
+export interface IncomingMilkOfferEvent {
+  fromPeerId: string;
+  senderName: string;
+  drink: MilkDrinkOption;
+  isNpc?: boolean;
+}
+
+export interface IncomingMilkRequestEvent {
+  fromPeerId: string;
+  requesterName: string;
+  drink: MilkDrinkOption;
+}
+
 export interface OnsenSceneHandle {
   triggerGreet: () => void;
   triggerKneadOrLoaf: () => void;
   triggerBathSoak: () => void;
-  playBambooNote: (noteIndex: number) => void;
-  playYarnTick: (count: number) => void;
+  triggerGroom: () => void;
   playVendingDrop: () => void;
+  holdMilk: (drink: MilkDrinkOption | null) => void;
+  drinkHeldMilk: () => void;
+  drinkSelfMilk: (bottleColor: string, capColor: string) => void;
+  offerHeldMilkToTarget: (explicitTarget?: MilkSocialTargetInfo) => void;
+  respondMilkOffer: (
+    fromPeerId: string,
+    drinkId: MilkDrinkId,
+    accepted: boolean,
+    isNpc?: boolean,
+  ) => void;
+  requestMilkFromTarget: (
+    drinkId?: MilkDrinkId,
+    explicitTarget?: MilkSocialTargetInfo,
+  ) => void;
+  respondMilkRequest: (
+    toPeerId: string,
+    drinkId: MilkDrinkId,
+    accepted: boolean,
+  ) => void;
   giftMilkToNearestNpc: (drinkLabel: string) => string | null;
   toggleWalkTrain: () => void;
   walkToZone: (zoneId: WorldZoneId) => void;
@@ -81,6 +132,7 @@ interface OnsenSceneProps {
   mixerSettings: AudioMixerSettings;
   trainActive: boolean;
   hideRemoteCats?: boolean;
+  heldMilk?: MilkDrinkOption | null;
   onActionModeChange?: (mode: CatActionMode) => void;
   onZoneChange?: (zone: WorldZoneId) => void;
   onWalkingTargetChange?: (label: string | null) => void;
@@ -90,10 +142,15 @@ interface OnsenSceneProps {
   onOpenMilkVending?: () => void;
   onIncrementKneadCount?: () => void;
   onCarryingChange?: (carrying: boolean) => void;
+  onHeldMilkChange?: (drink: MilkDrinkOption | null) => void;
+  onSocialTargetsChange?: (targets: {
+    nearbyGiveTarget: MilkSocialTargetInfo | null;
+    nearbyVendingTarget: MilkSocialTargetInfo | null;
+  }) => void;
+  onIncomingMilkOffer?: (offer: IncomingMilkOfferEvent) => void;
+  onIncomingMilkRequest?: (req: IncomingMilkRequestEvent) => void;
   onNearbyInteractChange?: (prompt: NearbyInteractPrompt | null) => void;
   onShowToast?: (message: string) => void;
-  onToggleXylophone?: () => void;
-  onToggleYarnModal?: () => void;
   onMultiplayerStatusChange?: (status: MultiplayerRoomStatus) => void;
   onRoomSnapshotWishes?: (wishes: WishYuzuItem[]) => void;
   onRemoteWishReceived?: (wish: WishYuzuItem) => void;
@@ -147,6 +204,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       mixerSettings,
       trainActive,
       hideRemoteCats = false,
+      heldMilk = null,
       onActionModeChange,
       onZoneChange,
       onWalkingTargetChange,
@@ -156,10 +214,12 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       onOpenMilkVending,
       onIncrementKneadCount,
       onCarryingChange,
+      onHeldMilkChange,
+      onSocialTargetsChange,
+      onIncomingMilkOffer,
+      onIncomingMilkRequest,
       onNearbyInteractChange,
       onShowToast,
-      onToggleXylophone,
-      onToggleYarnModal,
       onMultiplayerStatusChange,
       onRoomSnapshotWishes,
       onRemoteWishReceived,
@@ -173,6 +233,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
     const mixerRef = useRef<AudioMixerSettings>(mixerSettings);
     const trainActiveRef = useRef<boolean>(trainActive);
     const hideRemoteCatsRef = useRef<boolean>(hideRemoteCats);
+    const heldMilkRef = useRef<MilkDrinkOption | null>(heldMilk);
 
     const onActionModeChangeRef = useRef(onActionModeChange);
     const onZoneChangeRef = useRef(onZoneChange);
@@ -183,10 +244,12 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
     const onOpenMilkVendingRef = useRef(onOpenMilkVending);
     const onIncrementKneadCountRef = useRef(onIncrementKneadCount);
     const onCarryingChangeRef = useRef(onCarryingChange);
+    const onHeldMilkChangeRef = useRef(onHeldMilkChange);
+    const onSocialTargetsChangeRef = useRef(onSocialTargetsChange);
+    const onIncomingMilkOfferRef = useRef(onIncomingMilkOffer);
+    const onIncomingMilkRequestRef = useRef(onIncomingMilkRequest);
     const onNearbyInteractChangeRef = useRef(onNearbyInteractChange);
     const onShowToastRef = useRef(onShowToast);
-    const onToggleXylophoneRef = useRef(onToggleXylophone);
-    const onToggleYarnModalRef = useRef(onToggleYarnModal);
     const onMultiplayerStatusChangeRef = useRef(onMultiplayerStatusChange);
     const onRoomSnapshotWishesRef = useRef(onRoomSnapshotWishes);
     const onRemoteWishReceivedRef = useRef(onRemoteWishReceived);
@@ -199,10 +262,12 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
     onOpenMilkVendingRef.current = onOpenMilkVending;
     onIncrementKneadCountRef.current = onIncrementKneadCount;
     onCarryingChangeRef.current = onCarryingChange;
+    onHeldMilkChangeRef.current = onHeldMilkChange;
+    onSocialTargetsChangeRef.current = onSocialTargetsChange;
+    onIncomingMilkOfferRef.current = onIncomingMilkOffer;
+    onIncomingMilkRequestRef.current = onIncomingMilkRequest;
     onNearbyInteractChangeRef.current = onNearbyInteractChange;
     onShowToastRef.current = onShowToast;
-    onToggleXylophoneRef.current = onToggleXylophone;
-    onToggleYarnModalRef.current = onToggleYarnModal;
     onMultiplayerStatusChangeRef.current = onMultiplayerStatusChange;
     onRoomSnapshotWishesRef.current = onRoomSnapshotWishes;
     onRemoteWishReceivedRef.current = onRemoteWishReceived;
@@ -219,9 +284,36 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       triggerGreet: () => actionApiRef.current?.triggerGreet(),
       triggerKneadOrLoaf: () => actionApiRef.current?.triggerKneadOrLoaf(),
       triggerBathSoak: () => actionApiRef.current?.triggerBathSoak(),
-      playBambooNote: (idx: number) => actionApiRef.current?.playBambooNote(idx),
-      playYarnTick: (count: number) => actionApiRef.current?.playYarnTick(count),
+      triggerGroom: () => actionApiRef.current?.triggerGroom(),
       playVendingDrop: () => actionApiRef.current?.playVendingDrop(),
+      holdMilk: (drink: MilkDrinkOption | null) =>
+        actionApiRef.current?.holdMilk(drink),
+      drinkHeldMilk: () => actionApiRef.current?.drinkHeldMilk(),
+      drinkSelfMilk: (bottleColor: string, capColor: string) =>
+        actionApiRef.current?.drinkSelfMilk(bottleColor, capColor),
+      offerHeldMilkToTarget: (explicitTarget?: MilkSocialTargetInfo) =>
+        actionApiRef.current?.offerHeldMilkToTarget(explicitTarget),
+      respondMilkOffer: (
+        fromPeerId: string,
+        drinkId: MilkDrinkId,
+        accepted: boolean,
+        isNpc?: boolean,
+      ) =>
+        actionApiRef.current?.respondMilkOffer(
+          fromPeerId,
+          drinkId,
+          accepted,
+          isNpc,
+        ),
+      requestMilkFromTarget: (
+        drinkId?: MilkDrinkId,
+        explicitTarget?: MilkSocialTargetInfo,
+      ) => actionApiRef.current?.requestMilkFromTarget(drinkId, explicitTarget),
+      respondMilkRequest: (
+        toPeerId: string,
+        drinkId: MilkDrinkId,
+        accepted: boolean,
+      ) => actionApiRef.current?.respondMilkRequest(toPeerId, drinkId, accepted),
       giftMilkToNearestNpc: (drinkLabel: string) =>
         actionApiRef.current?.giftMilkToNearestNpc(drinkLabel) ?? null,
       toggleWalkTrain: () => actionApiRef.current?.toggleWalkTrain(),
@@ -241,6 +333,15 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       syncRemoteVisibilityRef.current?.(hideRemoteCats);
       forceTickRef.current?.();
     }, [hideRemoteCats]);
+
+    useEffect(() => {
+      heldMilkRef.current = heldMilk;
+      avatarRef.current?.setHeldMilk(
+        heldMilk ? heldMilk.bottleColor : null,
+        heldMilk?.capColor,
+      );
+      forceTickRef.current?.();
+    }, [heldMilk]);
 
     useEffect(() => {
       coatRef.current = coatId;
@@ -355,11 +456,11 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       const shadowRes = isMobile ? 1024 : 2048;
       sunLight.shadow.mapSize.set(shadowRes, shadowRes);
       sunLight.shadow.camera.near = 2;
-      sunLight.shadow.camera.far = 120;
-      sunLight.shadow.camera.left = -46;
-      sunLight.shadow.camera.right = 46;
-      sunLight.shadow.camera.top = 46;
-      sunLight.shadow.camera.bottom = -46;
+      sunLight.shadow.camera.far = 145;
+      sunLight.shadow.camera.left = -58;
+      sunLight.shadow.camera.right = 58;
+      sunLight.shadow.camera.top = 58;
+      sunLight.shadow.camera.bottom = -58;
       sunLight.shadow.bias = -0.0005;
       sunLight.shadow.normalBias = 0.075;
       sunLight.shadow.radius = isMobile ? 2.0 : 3.5;
@@ -414,10 +515,10 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       const npcRoots = npcEntries.map((e) => e.avatar.root);
 
       // Player & Action State
-      const playerPos = {
-        x: 0,
-        y: groundHeightAt(0, 38),
-        z: 38,
+      const playerPos: { x: number; y: number; z: number } = {
+        x: LANDMARKS.entranceBridge.x,
+        y: groundHeightAt(LANDMARKS.entranceBridge.x, LANDMARKS.entranceBridge.z),
+        z: LANDMARKS.entranceBridge.z,
       };
       let playerHeading = Math.PI;
       let cameraYaw = 0;
@@ -431,21 +532,34 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       let hasHeadYuzu = false;
       let carryingFirewood = false;
       let footstepTimer = 0;
+      let bathAutoGroomCooldown = 8.0;
+      let preGroomAction: CatActionMode = 'idle';
       let pendingArrivalAction:
         | 'soak'
         | 'sitBench'
+        | 'footSoak'
         | 'pickup_firewood'
         | 'stoke_firewood'
         | 'egg_ritual'
         | 'greet'
+        | 'milk_offer'
+        | 'milk_request'
         | 'loaf'
+        | 'knead'
+        | 'groom'
         | 'idle'
         | null = null;
       let pendingArrivalHeading: number | null = null;
+      let pendingSocialTarget: MilkSocialTargetInfo | null = null;
+      let pendingSocialDrinkId: MilkDrinkId = 'banana';
       let snapCameraNextTick = false;
       let hoveredInteractType: string | null = null;
       let lastNearbyPromptKey = '';
       let currentNearbyPrompt: NearbyInteractPrompt | null = null;
+      let lastSocialTargetsKey = '';
+      let lastNearbyGiveTarget: MilkSocialTargetInfo | null = null;
+      let lastNearbyVendingTarget: MilkSocialTargetInfo | null = null;
+      let npcMilkTimeoutId: number | null = null;
 
       const setCarryingFirewood = (next: boolean) => {
         if (carryingFirewood !== next) {
@@ -456,13 +570,34 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       };
 
       const setActionMode = (next: CatActionMode) => {
-        if (next === 'soak' || next === 'sitBench') {
+        if (next === 'soak' || next === 'sitBench' || next === 'footSoak') {
           setCarryingFirewood(false);
         }
         if (actionMode !== next) {
+          const prevAction = actionMode;
+          const keepBathState =
+            next === 'soak' || isInsideMainBath(playerPos.x, playerPos.z);
+
+          if (next === 'soak' && prevAction !== 'groom') {
+            bathAutoGroomCooldown = 1.6;
+          }
+          if (next === 'groom') {
+            preGroomAction =
+              prevAction === 'soak' ||
+              prevAction === 'sitBench' ||
+              prevAction === 'footSoak' ||
+              prevAction === 'carrying'
+                ? prevAction
+                : isInsideMainBath(playerPos.x, playerPos.z)
+                  ? 'soak'
+                  : carryingFirewood
+                    ? 'carrying'
+                    : 'idle';
+          }
+
           actionMode = next;
           actionTime = 0;
-          if (next !== 'soak') {
+          if (!keepBathState) {
             soakTime = 0;
             hasHeadYuzu = false;
           }
@@ -472,11 +607,23 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         }
       };
 
+      const setHeldMilkState = (drink: MilkDrinkOption | null) => {
+        if (drink) {
+          setCarryingFirewood(false);
+        }
+        heldMilkRef.current = drink;
+        avatar.setHeldMilk(drink ? drink.bottleColor : null, drink?.capColor);
+        onHeldMilkChangeRef.current?.(drink);
+      };
+
       const remoteEntries = new Map<
         string,
         { sim: RemoteCatSimState; avatar: CatAvatarController }
       >();
       let syncedServerFireCount = 0;
+
+      const formatRemoteCatName = (coatId: CatCoatId) =>
+        `${getCatCoatById(coatId).name} 손님`;
 
       const clearRemoteEntries = () => {
         for (const entry of remoteEntries.values()) {
@@ -503,6 +650,11 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           maxAnisotropy,
         );
         remoteAvatar.root.name = `RemoteCat-${peer.id}`;
+        remoteAvatar.root.userData = { isRemoteCat: true, remoteId: peer.id };
+        remoteAvatar.root.traverse((obj) => {
+          obj.userData.isRemoteCat = true;
+          obj.userData.remoteId = peer.id;
+        });
         remoteAvatar.root.position.set(sim.x, sim.y, sim.z);
         remoteAvatar.root.rotation.y = sim.heading;
         remoteAvatar.root.visible = !hideRemoteCatsRef.current;
@@ -534,6 +686,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         moveSpeed: currentSpeed,
         hasHeadYuzu,
         carryingFirewood,
+        heldMilkId: heldMilkRef.current?.id ?? null,
       });
 
       const multiplayer = new OnsenMultiplayerClient({
@@ -599,6 +752,60 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
               audio.playGiftChime();
             }
           }
+          forceTickRef.current?.();
+        },
+        onRemoteMilkOffer: (fromPeerId, fromCoatId, drinkId) => {
+          const drink = getMilkDrinkById(drinkId) ?? MILK_DRINK_OPTIONS[0];
+          const senderName = formatRemoteCatName(fromCoatId);
+          audio.playMeow(1.1);
+          onIncomingMilkOfferRef.current?.({
+            fromPeerId,
+            senderName,
+            drink,
+          });
+          forceTickRef.current?.();
+        },
+        onRemoteMilkRespond: (fromPeerId, fromCoatId, drinkId, accepted) => {
+          const drink = getMilkDrinkById(drinkId) ?? MILK_DRINK_OPTIONS[0];
+          const receiverName = formatRemoteCatName(fromCoatId);
+          if (accepted) {
+            setHeldMilkState(null);
+            const targetAvatar = remoteEntries.get(fromPeerId)?.avatar;
+            targetAvatar?.triggerDrinkMilk(drink.bottleColor, drink.capColor);
+            targetAvatar?.showSpeechBubble('😻 고맙다냥! 꿀꺽~ 💕', 3.5);
+            audio.playGiftChime();
+            multiplayer.sendState(getPlayerPayload(0), Date.now(), true);
+            onShowToastRef.current?.(
+              MILK_SOCIAL_MESSAGES.acceptSenderToast(receiverName, drink.label),
+            );
+          } else {
+            remoteEntries
+              .get(fromPeerId)
+              ?.avatar.showSpeechBubble('😿 배부르다냥... 마음만 고마워!', 3.0);
+            audio.playMeow(0.95);
+            onShowToastRef.current?.(
+              MILK_SOCIAL_MESSAGES.declineSenderToast(receiverName),
+            );
+          }
+          forceTickRef.current?.();
+        },
+        onRemoteMilkRequest: (fromPeerId, fromCoatId, drinkId) => {
+          const drink = getMilkDrinkById(drinkId) ?? MILK_DRINK_OPTIONS[0];
+          const requesterName = formatRemoteCatName(fromCoatId);
+          audio.playMeow(1.18);
+          onIncomingMilkRequestRef.current?.({
+            fromPeerId,
+            requesterName,
+            drink,
+          });
+          forceTickRef.current?.();
+        },
+        onRemoteMilkRequestDecline: (_fromPeerId, fromCoatId) => {
+          const targetName = formatRemoteCatName(fromCoatId);
+          audio.playMeow(0.95);
+          onShowToastRef.current?.(
+            MILK_SOCIAL_MESSAGES.requestDeclineSenderToast(targetName),
+          );
           forceTickRef.current?.();
         },
       });
@@ -675,6 +882,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         walkSpeedMode = 'normal';
         pendingArrivalAction = null;
         pendingArrivalHeading = null;
+        pendingSocialTarget = null;
         setWalkingTarget(null);
         world.setDestinationMarker(0, 0, 0, false);
       };
@@ -698,6 +906,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         setCarryingFirewood(true);
         setActionMode('carrying');
         audio.playWoodPickup();
+        avatar.showSpeechBubble('🪵 영차! 아궁이로 가져가자냥', 2.6);
         onShowToastRef.current?.(
           '체크무늬 수건을 두르고 장작 1개비를 들었어요! 옆의 아궁이를 클릭해 넣어주세요.',
         );
@@ -710,12 +919,16 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         world.stokeFirewood();
         audio.playFireStoke();
         multiplayer.sendFireStoke();
-        onShowToastRef.current?.('온천 온도 +1°C (42°C 유지!)');
+        avatar.showSpeechBubble('🔥 아궁이 활활! 노천탕이 더 따뜻해졌다냥', 3.2);
+        onShowToastRef.current?.('온천 온도 +1°C (노천탕 수증기가 모락모락!)');
         forceTickRef.current?.();
       };
 
       const performEggRitual = () => {
         const started = world.triggerEggRitual(() => {
+          playerHeading = cameraYaw;
+          avatar.triggerEatEgg();
+          avatar.showSpeechBubble('🥚 반숙 달걀 냠냠! 따끈하다냥 😋', 3.6);
           audio.playEggReadyChime();
           onShowToastRef.current?.(
             '온천 달걀이 따끈하게 익었어요! (촉촉한 반숙 완성)',
@@ -724,6 +937,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         });
         if (started) {
           audio.playEggDipBubbles();
+          avatar.showSpeechBubble('🥚 온천수에 달걀 삶는 중...', 2.4);
           onShowToastRef.current?.(
             '온천수 원천 바구니에 달걀을 담그고 있어요...',
           );
@@ -731,17 +945,163 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         forceTickRef.current?.();
       };
 
+      const offerMilkToSocialTarget = (explicitTarget?: MilkSocialTargetInfo) => {
+        const drink = heldMilkRef.current;
+        if (!drink) {
+          onShowToastRef.current?.('먼저 자판기에서 따뜻한 병우유를 뽑아 들어주세요.');
+          return;
+        }
+        const target = explicitTarget ?? lastNearbyGiveTarget;
+        if (!target) {
+          onShowToastRef.current?.(
+            '가까이에 우유를 건넬 다른 유저나 고양이가 없어요. 옆으로 걸어가 보세요!',
+          );
+          return;
+        }
+
+        audio.unlock();
+        if (target.kind === 'remote') {
+          const remoteEntry = remoteEntries.get(target.id);
+          if (!remoteEntry) {
+            onShowToastRef.current?.('친구가 방금 자리를 비웠어요.');
+            return;
+          }
+          playerHeading = Math.atan2(
+            remoteEntry.sim.x - playerPos.x,
+            remoteEntry.sim.z - playerPos.z,
+          );
+          setActionMode('greet');
+          audio.playMeow(1.08);
+          avatar.showSpeechBubble(`🎁 ${drink.label} 마실래냥?`, 3.0);
+          multiplayer.sendMilkOffer(target.id, drink.id);
+          onShowToastRef.current?.(
+            `${target.name}에게 ${drink.label}를 두 앞발로 내밀었어요! 응답을 기다리는 중... 🥛`,
+          );
+          forceTickRef.current?.();
+          return;
+        }
+
+        const npc = npcEntries.find((e) => e.state.spec.id === target.id);
+        if (!npc) return;
+        playerHeading = Math.atan2(
+          npc.state.x - playerPos.x,
+          npc.state.z - playerPos.z,
+        );
+        npc.state.greetReactionTimer = 2.6;
+        npc.state.greetTargetHeading = Math.atan2(
+          playerPos.x - npc.state.x,
+          playerPos.z - npc.state.z,
+        );
+        avatar.showSpeechBubble(`🎁 ${drink.label} 선물이다냥!`, 2.4);
+        npc.avatar.triggerDrinkMilk(drink.bottleColor, drink.capColor);
+        npc.avatar.showSpeechBubble('😻 고맙다냥! 꿀꺽~ 💕', 3.5);
+        audio.playGiftChime();
+        setHeldMilkState(null);
+        multiplayer.sendState(getPlayerPayload(0), Date.now(), true);
+        onShowToastRef.current?.(
+          MILK_SOCIAL_MESSAGES.acceptSenderToast(npc.state.spec.name, drink.label),
+        );
+        forceTickRef.current?.();
+      };
+
+      const requestMilkFromSocialTarget = (
+        drinkId: MilkDrinkId = 'banana',
+        explicitTarget?: MilkSocialTargetInfo,
+      ) => {
+        if (!isNearMilkVending(playerPos.x, playerPos.z)) {
+          onShowToastRef.current?.(
+            '우유 자판기 근처에서 다른 고양이에게 우유를 요청할 수 있어요 🥛',
+          );
+          return;
+        }
+        const target = explicitTarget ?? lastNearbyVendingTarget;
+        if (!target) {
+          onShowToastRef.current?.(
+            '자판기 근처에 우유를 요청할 다른 유저나 고양이가 없어요.',
+          );
+          return;
+        }
+        const drink = getMilkDrinkById(drinkId) ?? MILK_DRINK_OPTIONS[0];
+        audio.unlock();
+
+        if (target.kind === 'remote') {
+          const remoteEntry = remoteEntries.get(target.id);
+          if (!remoteEntry) {
+            onShowToastRef.current?.('상대 고양이가 멀어졌어요.');
+            return;
+          }
+          playerHeading = Math.atan2(
+            remoteEntry.sim.x - playerPos.x,
+            remoteEntry.sim.z - playerPos.z,
+          );
+          setActionMode('greet');
+          audio.playMeow(1.16);
+          avatar.showSpeechBubble(`🥺 ${drink.label} 한 병만 사달라냥~`, 2.8);
+          multiplayer.sendMilkRequest(target.id, drink.id);
+          onShowToastRef.current?.(
+            `${target.name}에게 "${drink.label} 한 병만 사달라냥~" 하고 조르는 중... 🥺`,
+          );
+          forceTickRef.current?.();
+          return;
+        }
+
+        const npc = npcEntries.find((e) => e.state.spec.id === target.id);
+        if (!npc) return;
+        playerHeading = Math.atan2(
+          npc.state.x - playerPos.x,
+          npc.state.z - playerPos.z,
+        );
+        npc.state.greetReactionTimer = 2.4;
+        npc.state.greetTargetHeading = Math.atan2(
+          playerPos.x - npc.state.x,
+          playerPos.z - npc.state.z,
+        );
+        setActionMode('greet');
+        npc.avatar.setHeldMilk(drink.bottleColor, drink.capColor);
+        audio.playMeow(1.16);
+        avatar.showSpeechBubble(`🥺 ${drink.label} 한 병만 사달라냥~`, 2.8);
+        onShowToastRef.current?.(
+          `${npc.state.spec.name}에게 "${drink.label} 한 병만 사달라냥~" 하고 조르는 중... 🥺`,
+        );
+
+        if (npcMilkTimeoutId !== null) window.clearTimeout(npcMilkTimeoutId);
+        npcMilkTimeoutId = window.setTimeout(() => {
+          npcMilkTimeoutId = null;
+          npc.avatar.showSpeechBubble(`🍼 여기 ${drink.label} 마셔라냥!`, 3.2);
+          audio.playVendingDrop();
+          onIncomingMilkOfferRef.current?.({
+            fromPeerId: npc.state.spec.id,
+            senderName: npc.state.spec.name,
+            drink,
+            isNpc: true,
+          });
+        }, 650);
+        forceTickRef.current?.();
+      };
+
       const executeArrival = (
         arrival: typeof pendingArrivalAction,
         heading: number | null,
       ) => {
-        if (heading !== null) playerHeading = heading;
+        const socialTarget = pendingSocialTarget;
+        const socialDrinkId = pendingSocialDrinkId;
+        pendingSocialTarget = null;
+        if (arrival !== 'soak' && heading !== null) playerHeading = heading;
         if (arrival === 'sitBench') {
           setActionMode('sitBench');
+        } else if (arrival === 'footSoak') {
+          setActionMode('footSoak');
         } else if (arrival === 'soak') {
           setActionMode('soak');
         } else if (arrival === 'loaf') {
           setActionMode('loaf');
+        } else if (arrival === 'knead') {
+          setActionMode('knead');
+          onIncrementKneadCountRef.current?.();
+        } else if (arrival === 'groom') {
+          setActionMode('groom');
+          audio.playGroomSound();
+          onIncrementKneadCountRef.current?.();
         } else if (arrival === 'pickup_firewood') {
           performFirewoodPickup();
         } else if (arrival === 'stoke_firewood') {
@@ -751,6 +1111,10 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           performEggRitual();
         } else if (arrival === 'greet') {
           triggerGreetAction();
+        } else if (arrival === 'milk_offer') {
+          offerMilkToSocialTarget(socialTarget ?? undefined);
+        } else if (arrival === 'milk_request') {
+          requestMilkFromSocialTarget(socialDrinkId, socialTarget ?? undefined);
         } else {
           setActionMode(
             isInsideMainBath(playerPos.x, playerPos.z)
@@ -759,6 +1123,41 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
                 ? 'carrying'
                 : 'idle',
           );
+        }
+      };
+
+      const getOccupiedCushionPositions = (): Vec2[] => {
+        const occupied: Vec2[] = npcEntries.map((entry) => ({
+          x: entry.state.x,
+          z: entry.state.z,
+        }));
+        if (!hideRemoteCatsRef.current) {
+          for (const entry of remoteEntries.values()) {
+            occupied.push({ x: entry.sim.x, z: entry.sim.z });
+          }
+        }
+        return occupied;
+      };
+
+      const triggerCushionActionInHall = (
+        action: 'knead' | 'groom',
+        toastMessage: string,
+      ) => {
+        const cushion = findNearestEmptyCushion(
+          playerPos.x,
+          playerPos.z,
+          getOccupiedCushionPositions(),
+        );
+        if (Math.hypot(cushion.x - playerPos.x, cushion.z - playerPos.z) <= 0.32) {
+          executeArrival(action, cushion.heading);
+        } else {
+          onShowToastRef.current?.(toastMessage);
+          startWalkPath(cushion.x, cushion.z, {
+            arrivalAction: action,
+            headingOnArrival: cushion.heading,
+            speedMode: 'normal',
+            label: null,
+          });
         }
       };
 
@@ -797,7 +1196,9 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           const markerY =
             pendingArrivalAction === 'sitBench'
               ? 0.34
-              : groundHeightAt(lastWp.x, lastWp.z);
+              : pendingArrivalAction === 'footSoak'
+                ? FOOTBATH_DECK_HEIGHT + 0.02
+                : groundHeightAt(lastWp.x, lastWp.z);
           world.setDestinationMarker(lastWp.x, markerY, lastWp.z, true);
         }
         if (walkQueue.length > 0 && actionMode !== 'walk') {
@@ -812,22 +1213,33 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         arrivalAction:
           | 'soak'
           | 'sitBench'
+          | 'footSoak'
           | 'pickup_firewood'
           | 'stoke_firewood'
           | 'egg_ritual'
-          | 'greet',
+          | 'greet'
+          | 'milk_offer'
+          | 'milk_request'
+          | 'knead'
+          | 'groom',
         headingOnArrival?: number,
+        socialTarget?: MilkSocialTargetInfo,
+        socialDrinkId: MilkDrinkId = 'banana',
       ) => {
         const dist = Math.hypot(destX - playerPos.x, destZ - playerPos.z);
         const immediateRadius =
           arrivalAction === 'pickup_firewood' ||
           arrivalAction === 'stoke_firewood' ||
           arrivalAction === 'egg_ritual' ||
-          arrivalAction === 'greet'
+          arrivalAction === 'greet' ||
+          arrivalAction === 'milk_offer' ||
+          arrivalAction === 'milk_request'
             ? 0.65
             : 0.35;
         if (dist <= immediateRadius) {
           clearWalkJourney();
+          pendingSocialTarget = socialTarget ?? null;
+          pendingSocialDrinkId = socialDrinkId;
           executeArrival(arrivalAction, headingOnArrival ?? null);
           forceTickRef.current?.();
           return;
@@ -839,6 +1251,8 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           speedMode: 'normal',
           label: null,
         });
+        pendingSocialTarget = socialTarget ?? null;
+        pendingSocialDrinkId = socialDrinkId;
       };
 
       let greetNpcTimeoutId: number | null = null;
@@ -883,13 +1297,38 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
             greetNpcTimeoutId = null;
           }, 280);
 
+          avatar.showSpeechBubble('🐾 반갑다냥!', 2.4);
+          closestNpc.avatar.showSpeechBubble('💕 야옹~ 반가워!', 2.6);
           onShowToastRef.current?.(
             `${closestNpc.state.spec.name}(이)가 코를 콩 맞대며 반갑게 인사해요! 🐾💕`,
           );
         } else {
+          avatar.showSpeechBubble('🐾 반갑다냥!', 2.4);
           onShowToastRef.current?.('코를 쫑긋거리며 주변 친구들에게 반갑게 코인사해요 🐾');
         }
 
+        forceTickRef.current?.();
+      };
+
+      const performSelfMilkDrink = (bottleColor: string, capColor: string) => {
+        clearWalkJourney();
+        playerHeading = cameraYaw;
+        if (
+          actionMode === 'greet' ||
+          actionMode === 'knead' ||
+          actionMode === 'groom'
+        ) {
+          setActionMode(isInsideMainBath(playerPos.x, playerPos.z) ? 'soak' : 'idle');
+        }
+        setHeldMilkState(null);
+        audio.unlock();
+        audio.playVendingDrop();
+        avatar.triggerDrinkMilk(bottleColor, capColor);
+        avatar.showSpeechBubble('🥛 꿀꺽꿀꺽~ 노곤해진다냥 💕', 3.5);
+        multiplayer.sendState(getPlayerPayload(0), Date.now(), true);
+        window.setTimeout(() => {
+          audio.playGiftChime();
+        }, 220);
         forceTickRef.current?.();
       };
 
@@ -904,15 +1343,22 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
             setActionMode('loaf');
           } else if (actionMode === 'loaf') {
             setActionMode(carryingFirewood ? 'carrying' : 'idle');
+          } else if (detectZone(playerPos.x, playerPos.z) === 'tatami_hall') {
+            triggerCushionActionInHall(
+              'knead',
+              '가까운 빈 방석으로 총총 걸어가 앉아요 🐾',
+            );
           } else {
-            setActionMode('knead');
-            onIncrementKneadCountRef.current?.();
+            executeArrival('knead', null);
           }
           forceTickRef.current?.();
         },
         triggerBathSoak: () => {
           audio.unlock();
-          if (actionMode === 'soak') {
+          if (
+            actionMode === 'soak' ||
+            (actionMode === 'groom' && isInsideMainBath(playerPos.x, playerPos.z))
+          ) {
             startWalkPath(0, 12.2, {
               arrivalAction: 'idle',
               headingOnArrival: 0,
@@ -925,19 +1371,116 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
             ACTION_SPOTS.bathSoakSpot.x,
             ACTION_SPOTS.bathSoakSpot.z,
             'soak',
-            Math.PI,
+            cameraYaw,
           );
         },
-        playBambooNote: (idx: number) => {
-          audio.playBambooNote(idx);
-        },
-        playYarnTick: (count: number) => {
-          audio.playYarnTick(count);
+        triggerGroom: () => {
+          audio.unlock();
+          clearWalkJourney();
+          if (actionMode === 'groom') {
+            const returnAction = isInsideMainBath(playerPos.x, playerPos.z)
+              ? 'soak'
+              : preGroomAction === 'sitBench' || preGroomAction === 'footSoak'
+                ? preGroomAction
+                : carryingFirewood
+                  ? 'carrying'
+                  : 'idle';
+            if (returnAction === 'soak') {
+              bathAutoGroomCooldown = 12.0;
+            }
+            setActionMode(returnAction);
+          } else if (detectZone(playerPos.x, playerPos.z) === 'tatami_hall') {
+            triggerCushionActionInHall(
+              'groom',
+              '가까운 빈 방석으로 총총 걸어가 그루밍해요 🐾',
+            );
+          } else {
+            executeArrival('groom', null);
+          }
+          forceTickRef.current?.();
         },
         playVendingDrop: () => {
           audio.playVendingDrop();
         },
-        giftMilkToNearestNpc: (_drinkLabel: string) => {
+        holdMilk: (drink: MilkDrinkOption | null) => {
+          audio.unlock();
+          if (drink) {
+            clearWalkJourney();
+            playerHeading = cameraYaw;
+            audio.playVendingDrop();
+            avatar.showSpeechBubble(`🍼 ${drink.label} 뽑았다냥!`, 2.6);
+          }
+          setHeldMilkState(drink);
+          multiplayer.sendState(getPlayerPayload(0), Date.now(), true);
+          forceTickRef.current?.();
+        },
+        drinkHeldMilk: () => {
+          const drink = heldMilkRef.current ?? MILK_DRINK_OPTIONS[0];
+          performSelfMilkDrink(drink.bottleColor, drink.capColor);
+        },
+        drinkSelfMilk: (bottleColor: string, capColor: string) => {
+          performSelfMilkDrink(bottleColor, capColor);
+        },
+        offerHeldMilkToTarget: (explicitTarget?: MilkSocialTargetInfo) => {
+          offerMilkToSocialTarget(explicitTarget);
+        },
+        respondMilkOffer: (
+          fromPeerId: string,
+          drinkId: MilkDrinkId,
+          accepted: boolean,
+          isNpc?: boolean,
+        ) => {
+          const drink = getMilkDrinkById(drinkId) ?? MILK_DRINK_OPTIONS[0];
+          audio.unlock();
+          if (isNpc) {
+            for (const entry of npcEntries) {
+              entry.avatar.setHeldMilk(null);
+            }
+          } else {
+            multiplayer.sendMilkRespond(fromPeerId, drink.id, accepted);
+          }
+          if (accepted) {
+            performSelfMilkDrink(drink.bottleColor, drink.capColor);
+          } else {
+            audio.playMeow(1.1);
+            avatar.showSpeechBubble('😿 배가 볼록하다냥... 마음만 받을게!', 3.0);
+            onShowToastRef.current?.(MILK_SOCIAL_MESSAGES.declineReceiverToast);
+            forceTickRef.current?.();
+          }
+        },
+        requestMilkFromTarget: (
+          drinkId: MilkDrinkId = 'banana',
+          explicitTarget?: MilkSocialTargetInfo,
+        ) => {
+          requestMilkFromSocialTarget(drinkId, explicitTarget);
+        },
+        respondMilkRequest: (
+          toPeerId: string,
+          drinkId: MilkDrinkId,
+          accepted: boolean,
+        ) => {
+          const drink = getMilkDrinkById(drinkId) ?? MILK_DRINK_OPTIONS[0];
+          audio.unlock();
+          if (accepted) {
+            audio.playVendingDrop();
+            avatar.triggerGiftAfterglow();
+            multiplayer.sendMilkOffer(toPeerId, drink.id);
+            onShowToastRef.current?.(
+              `${drink.label}를 자판기에서 뽑아 조르는 친구에게 건넸어요! 🍼✨`,
+            );
+          } else {
+            audio.playMeow(0.95);
+            multiplayer.sendMilkRequestDecline(toPeerId, drink.id);
+            onShowToastRef.current?.(
+              '도토리뿐이라 다음에 사주겠다고 전했어요 🌰🐾',
+            );
+          }
+          forceTickRef.current?.();
+        },
+        giftMilkToNearestNpc: (drinkLabel: string) => {
+          const drink =
+            MILK_DRINK_OPTIONS.find((d) => d.label === drinkLabel) ??
+            MILK_DRINK_OPTIONS[0];
           const visibleRemotes = hideRemoteCatsRef.current
             ? []
             : Array.from(remoteEntries.values()).map((entry) => ({
@@ -962,7 +1505,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           if (winner.kind === 'remote') {
             const target = remoteEntries.get(winner.id);
             if (!target) return null;
-            target.avatar.triggerGiftAfterglow();
+            target.avatar.triggerDrinkMilk(drink.bottleColor, drink.capColor);
             audio.playGiftChime();
             multiplayer.sendMilkGift(winner.id);
             forceTickRef.current?.();
@@ -971,7 +1514,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
 
           const npc = npcEntries.find((e) => e.state.spec.id === winner.id);
           if (!npc) return null;
-          npc.avatar.triggerGiftAfterglow();
+          npc.avatar.triggerDrinkMilk(drink.bottleColor, drink.capColor);
           audio.playGiftChime();
           forceTickRef.current?.();
           return npc.state.spec.name;
@@ -1066,9 +1609,15 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           const modeCaption =
             actionMode === 'soak'
               ? '노천 편백탕 유자 입욕'
-              : actionMode === 'sitBench'
-                ? '오목눈이와 원목 평상 휴식'
-                : '묘유원의 따뜻한 한때';
+              : actionMode === 'footSoak'
+                ? '편백 족욕 데크 물장구 쉼터'
+                : actionMode === 'groom' && isInsideMainBath(playerPos.x, playerPos.z)
+                  ? '노천 편백탕 그루밍'
+                  : actionMode === 'groom'
+                    ? '포근한 고양이 그루밍'
+                    : actionMode === 'sitBench'
+                      ? '오목눈이와 원목 평상 휴식'
+                      : '묘유원의 따뜻한 한때';
           const d = new Date();
           const dateStr = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
 
@@ -1097,10 +1646,36 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         },
       };
 
+      function pickEmptySeatSpot<T extends { x: number; z: number; heading: number }>(
+        spots: readonly T[],
+        requestedIndex: number | undefined,
+        fallbackFinder: (x: number, z: number, occupied: readonly Vec2[]) => T,
+        hitPoint?: THREE.Vector3,
+      ): T {
+        const occupied = getOccupiedCushionPositions();
+        const clickedSpot =
+          requestedIndex !== undefined ? spots[requestedIndex] : undefined;
+        const clickedOccupied =
+          clickedSpot !== undefined &&
+          occupied.some(
+            (occ) => Math.hypot(clickedSpot.x - occ.x, clickedSpot.z - occ.z) <= 0.75,
+          );
+        if (clickedSpot && !clickedOccupied) {
+          return clickedSpot;
+        }
+        return fallbackFinder(
+          hitPoint?.x ?? playerPos.x,
+          hitPoint?.z ?? playerPos.z,
+          occupied,
+        );
+      }
+
       function executeInteractType(
         kind: string | undefined,
         hitPoint?: THREE.Vector3,
         wishId?: string,
+        cushionIndex?: number,
+        footbathIndex?: number,
       ): boolean {
         if (kind === 'wish_yuzu' && wishId) {
           onSelectWishYuzuRef.current?.(wishId);
@@ -1119,6 +1694,22 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         }
         if (kind === 'milk_vending') {
           onOpenMilkVendingRef.current?.();
+          const distToVending = Math.hypot(
+            playerPos.x - ACTION_SPOTS.milkVendingSpot.x,
+            playerPos.z - ACTION_SPOTS.milkVendingSpot.z,
+          );
+          if (distToVending > 3.8) {
+            startWalkPath(
+              ACTION_SPOTS.milkVendingSpot.x,
+              ACTION_SPOTS.milkVendingSpot.z,
+              {
+                arrivalAction: 'idle',
+                headingOnArrival: ACTION_SPOTS.milkVendingSpot.heading,
+                speedMode: 'normal',
+                label: null,
+              },
+            );
+          }
           return true;
         }
         if (kind === 'milk_bench') {
@@ -1163,12 +1754,73 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           );
           return true;
         }
+        if (kind === 'tatami_cushion') {
+          const targetSpot = pickEmptySeatSpot(
+            MYOYEONGAK_CUSHION_SPOTS,
+            cushionIndex,
+            findNearestEmptyCushion,
+            hitPoint,
+          );
+          moveOrSettleTo(targetSpot.x, targetSpot.z, 'knead', targetSpot.heading);
+          return true;
+        }
+        if (kind === 'footbath_seat') {
+          const targetSeat = pickEmptySeatSpot(
+            FOOTBATH_SEAT_SPOTS,
+            footbathIndex,
+            findNearestEmptyFootbathSeat,
+            hitPoint,
+          );
+          moveOrSettleTo(targetSeat.x, targetSeat.z, 'footSoak', targetSeat.heading);
+          return true;
+        }
         if (kind === 'main_bath' && hitPoint) {
-          moveOrSettleTo(hitPoint.x, hitPoint.z, 'soak');
+          moveOrSettleTo(hitPoint.x, hitPoint.z, 'soak', cameraYaw);
           return true;
         }
         return false;
       }
+
+      const getVisibleRemoteRoots = (): THREE.Object3D[] =>
+        hideRemoteCatsRef.current
+          ? []
+          : Array.from(remoteEntries.values(), (entry) => entry.avatar.root);
+
+      const walkToAndInteractWithCat = (
+        catX: number,
+        catZ: number,
+        socialTarget?: MilkSocialTargetInfo,
+      ) => {
+        const dist = Math.hypot(catX - playerPos.x, catZ - playerPos.z);
+        const desiredAction: 'milk_offer' | 'milk_request' | 'greet' =
+          heldMilkRef.current && socialTarget
+            ? 'milk_offer'
+            : isNearMilkVending(playerPos.x, playerPos.z) && socialTarget
+              ? 'milk_request'
+              : 'greet';
+
+        if (dist <= 3.2) {
+          if (desiredAction === 'milk_offer') {
+            offerMilkToSocialTarget(socialTarget);
+          } else if (desiredAction === 'milk_request') {
+            requestMilkFromSocialTarget('banana', socialTarget);
+          } else {
+            triggerGreetAction();
+          }
+          return;
+        }
+
+        const angle = Math.atan2(playerPos.x - catX, playerPos.z - catZ);
+        const stopX = catX + Math.sin(angle) * 1.35;
+        const stopZ = catZ + Math.cos(angle) * 1.35;
+        moveOrSettleTo(
+          stopX,
+          stopZ,
+          desiredAction,
+          Math.atan2(catX - stopX, catZ - stopZ),
+          socialTarget,
+        );
+      };
 
       const updateHoverRaycast = (clientX: number, clientY: number) => {
         const rect = canvas.getBoundingClientRect();
@@ -1178,10 +1830,11 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         raycaster.setFromCamera(pointerNdc, camera);
         const interactHits = raycaster.intersectObjects(world.interactables, false);
         const npcHits = raycaster.intersectObjects(npcRoots, true);
-        const isHoverNpc = npcHits.length > 0;
+        const remoteHits = raycaster.intersectObjects(getVisibleRemoteRoots(), true);
+        const isHoverCat = npcHits.length > 0 || remoteHits.length > 0;
         hoveredInteractType =
           (interactHits[0]?.object.userData?.interactType as string | undefined) ??
-          (isHoverNpc ? 'npc_cat' : null);
+          (isHoverCat ? 'npc_cat' : null);
         canvas.style.cursor = hoveredInteractType ? 'pointer' : 'grab';
       };
 
@@ -1214,7 +1867,9 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
             actionMode === 'knead' ||
             actionMode === 'loaf' ||
             actionMode === 'greet' ||
-            actionMode === 'sitBench'
+            actionMode === 'groom' ||
+            actionMode === 'sitBench' ||
+            actionMode === 'footSoak'
           ) {
             setActionMode('walk');
           }
@@ -1224,6 +1879,8 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           actionApiRef.current?.triggerKneadOrLoaf();
         } else if (e.code === 'KeyE') {
           actionApiRef.current?.triggerBathSoak();
+        } else if (e.code === 'KeyR') {
+          actionApiRef.current?.triggerGroom();
         } else if (e.code === 'KeyF') {
           const promptNow =
             currentNearbyPrompt ??
@@ -1233,20 +1890,12 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           }
         } else if (e.code === 'KeyT') {
           actionApiRef.current?.toggleWalkTrain();
-        } else if (e.code === 'KeyY') {
-          onToggleYarnModalRef.current?.();
-        } else if (e.code === 'KeyM') {
-          onToggleXylophoneRef.current?.();
-          audio.playBambooNote(Math.floor(Math.random() * 5));
         } else if (e.code === 'Escape') {
           if (walkQueue.length > 0 || walkingTargetLabel !== null) {
             stopAutoWalk();
           } else {
             actionApiRef.current?.standUp();
           }
-        } else if (e.code >= 'Digit1' && e.code <= 'Digit5') {
-          const noteIdx = Number(e.code.replace('Digit', '')) - 1;
-          audio.playBambooNote(noteIdx);
         }
       };
 
@@ -1325,12 +1974,53 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
             const hitObj = interactHits[0].object;
             const kind = hitObj.userData?.interactType as string | undefined;
             const wishId = hitObj.userData?.wishId ? String(hitObj.userData.wishId) : undefined;
-            if (executeInteractType(kind, interactHits[0].point, wishId)) {
+            const cushionIndex =
+              typeof hitObj.userData?.cushionIndex === 'number'
+                ? hitObj.userData.cushionIndex
+                : undefined;
+            const footbathIndex =
+              typeof hitObj.userData?.footbathIndex === 'number'
+                ? hitObj.userData.footbathIndex
+                : undefined;
+            if (
+              executeInteractType(
+                kind,
+                interactHits[0].point,
+                wishId,
+                cushionIndex,
+                footbathIndex,
+              )
+            ) {
               return;
             }
           }
 
-          // 1b. Check direct click on NPC Cat Friends -> walk over & do 코인사!
+          // 1b. Check direct click on Remote Peer Cats -> offer held milk / request at vending / greet!
+          const remoteRoots = getVisibleRemoteRoots();
+          if (remoteRoots.length > 0) {
+            const remoteHits = raycaster.intersectObjects(remoteRoots, true);
+            if (remoteHits.length > 0) {
+              let hitObj: THREE.Object3D | null = remoteHits[0].object;
+              let targetRemoteId: string | undefined;
+              while (hitObj && !targetRemoteId) {
+                if (hitObj.userData?.remoteId) {
+                  targetRemoteId = hitObj.userData.remoteId as string;
+                }
+                hitObj = hitObj.parent;
+              }
+              const hitRemote = targetRemoteId ? remoteEntries.get(targetRemoteId) : undefined;
+              if (hitRemote) {
+                walkToAndInteractWithCat(hitRemote.sim.x, hitRemote.sim.z, {
+                  kind: 'remote',
+                  id: hitRemote.sim.id,
+                  name: formatRemoteCatName(hitRemote.sim.coatId),
+                });
+                return;
+              }
+            }
+          }
+
+          // 1c. Check direct click on NPC Cat Friends -> offer held milk / request / 코인사!
           const npcHits = raycaster.intersectObjects(npcRoots, true);
           if (npcHits.length > 0) {
             let hitObj: THREE.Object3D | null = npcHits[0].object;
@@ -1343,20 +2033,11 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
             }
             const hitNpc = npcEntries.find((e) => e.state.spec.id === targetNpcId);
             if (hitNpc) {
-              const dist = Math.hypot(hitNpc.state.x - playerPos.x, hitNpc.state.z - playerPos.z);
-              if (dist <= 3.2) {
-                triggerGreetAction();
-              } else {
-                const angle = Math.atan2(playerPos.x - hitNpc.state.x, playerPos.z - hitNpc.state.z);
-                const stopX = hitNpc.state.x + Math.sin(angle) * 1.35;
-                const stopZ = hitNpc.state.z + Math.cos(angle) * 1.35;
-                moveOrSettleTo(
-                  stopX,
-                  stopZ,
-                  'greet',
-                  Math.atan2(hitNpc.state.x - stopX, hitNpc.state.z - stopZ),
-                );
-              }
+              walkToAndInteractWithCat(hitNpc.state.x, hitNpc.state.z, {
+                kind: 'npc',
+                id: hitNpc.state.spec.id,
+                name: hitNpc.state.spec.name,
+              });
               return;
             }
           }
@@ -1468,7 +2149,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           }
           moveDirX = keyMove.dx;
           moveDirZ = keyMove.dz;
-          moveSpeed = 2.75;
+          moveSpeed = 1.65;
           playerHeading = shortestAngleLerp(
             playerHeading,
             keyMove.heading,
@@ -1499,10 +2180,10 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           } else {
             moveDirX = dx / (dist || 1);
             moveDirZ = dz / (dist || 1);
-            const cruiseSpeed = walkSpeedMode === 'journey' ? 3.4 : 2.75;
+            const cruiseSpeed = walkSpeedMode === 'journey' ? 2.25 : 1.65;
             moveSpeed =
               walkQueue.length === 1 && dist < 0.7
-                ? Math.min(cruiseSpeed, Math.max(1.2, dist * 4.5))
+                ? Math.min(cruiseSpeed, Math.max(0.85, dist * 3.5))
                 : cruiseSpeed;
             const targetHeading = Math.atan2(moveDirX, moveDirZ);
             playerHeading = shortestAngleLerp(
@@ -1526,6 +2207,26 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           // Timed ritual state transitions
           if (actionMode === 'greet' && actionTime >= GREET_DURATION) {
             setActionMode(carryingFirewood ? 'carrying' : 'idle');
+          } else if (actionMode === 'groom' && actionTime >= GROOM_DURATION) {
+            const returnAction = isInsideMainBath(playerPos.x, playerPos.z)
+              ? 'soak'
+              : preGroomAction === 'sitBench' || preGroomAction === 'footSoak'
+                ? preGroomAction
+                : carryingFirewood
+                  ? 'carrying'
+                  : 'idle';
+            if (returnAction === 'soak') {
+              bathAutoGroomCooldown = 12.0;
+            }
+            setActionMode(returnAction);
+          } else if (actionMode === 'soak') {
+            bathAutoGroomCooldown -= wallDt;
+            if (bathAutoGroomCooldown <= 0) {
+              bathAutoGroomCooldown = 12.0;
+              setActionMode('groom');
+              audio.playGroomSound();
+              onIncrementKneadCountRef.current?.();
+            }
           } else if (actionMode === 'knead' && actionTime >= KNEAD_LOOP_DURATION) {
             setActionMode('loaf');
           } else if (actionMode === 'walk') {
@@ -1548,37 +2249,60 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
 
           footstepTimer -= dt;
           if (footstepTimer <= 0) {
-            footstepTimer = walkSpeedMode === 'journey' ? 0.3 : 0.36;
+            footstepTimer = walkSpeedMode === 'journey' ? 0.38 : 0.45;
             audio.playFootstep(detectFootstepSurface(playerPos.x, playerPos.z));
           }
         } else {
           footstepTimer = 0.08;
         }
 
+        // Smoothly face camera when resting inside the bath so cat's face stays clearly visible
+        if (
+          actionMode === 'soak' ||
+          (actionMode === 'groom' && isInsideMainBath(playerPos.x, playerPos.z))
+        ) {
+          playerHeading = shortestAngleLerp(
+            playerHeading,
+            cameraYaw,
+            exponentialDampingAlpha(dt, 9),
+          );
+        }
+
         // Soak timer -> pop yellow yuzu onto head towel after SOAK_YUZU_DELAY
-        if (actionMode === 'soak') {
+        if (isInsideMainBath(playerPos.x, playerPos.z)) {
           soakTime += wallDt;
           if (!hasHeadYuzu && soakTime >= SOAK_YUZU_DELAY) {
             hasHeadYuzu = true;
             container.dataset.headYuzu = '1';
           }
+        } else if (actionMode !== 'soak' && (soakTime > 0 || hasHeadYuzu)) {
+          soakTime = 0;
+          hasHeadYuzu = false;
+          container.dataset.headYuzu = '0';
         }
 
-        // Smooth ground/stair/bench/basin Y damping
+        // Smooth ground/stair/bench/deck/basin Y damping
         const targetGroundY =
-          actionMode === 'sitBench' ? 0.34 : groundHeightAt(playerPos.x, playerPos.z);
+          actionMode === 'sitBench'
+            ? 0.34
+            : actionMode === 'footSoak'
+              ? FOOTBATH_DECK_HEIGHT
+              : groundHeightAt(playerPos.x, playerPos.z);
         playerPos.y = THREE.MathUtils.damp(playerPos.y, targetGroundY, 12, dt);
 
         avatar.root.position.set(playerPos.x, playerPos.y, playerPos.z);
         avatar.root.rotation.y = playerHeading;
 
+        const playerBathTowel =
+          !carryingFirewood &&
+          (actionMode === 'soak' || isInsideMainBath(playerPos.x, playerPos.z));
         avatar.update(
           dt,
           moveSpeed,
           actionMode,
           actionTime,
           hasHeadYuzu,
-          undefined,
+          playerBathTowel,
           carryingFirewood,
         );
 
@@ -1590,6 +2314,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           dt,
           groundHeightAt,
           { maxFollowers: DEFAULT_MAX_TRAIN_FOLLOWERS },
+          elapsed,
         );
         for (let i = 0; i < npcEntries.length; i++) {
           const entry = npcEntries[i];
@@ -1597,7 +2322,10 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           entry.avatar.root.position.set(s.x, s.y, s.z);
           entry.avatar.root.rotation.y = s.heading;
           const showRestingProps =
-            s.actionMode === 'soak' || s.actionMode === 'loaf' || s.actionMode === 'greet';
+            s.actionMode === 'soak' ||
+            s.actionMode === 'loaf' ||
+            s.actionMode === 'greet' ||
+            s.actionMode === 'groom';
           entry.avatar.update(
             dt,
             s.moveSpeed,
@@ -1621,6 +2349,11 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           }
           for (const entry of remoteEntries.values()) {
             const renderedSpeed = stepRemoteCatSim(entry.sim, dt);
+            const remoteMilk = getMilkDrinkById(entry.sim.heldMilkId);
+            entry.avatar.setHeldMilk(
+              remoteMilk ? remoteMilk.bottleColor : null,
+              remoteMilk?.capColor,
+            );
             entry.avatar.root.visible = !hideRemoteCatsRef.current;
             entry.avatar.root.position.set(entry.sim.x, entry.sim.y, entry.sim.z);
             entry.avatar.root.rotation.y = entry.sim.heading;
@@ -1657,11 +2390,68 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           onNearbyInteractChangeRef.current?.(nextNearby);
         }
 
-        // Update spatial audio levels (water 9m attenuation + purr proximity + indoor hall attenuation)
+        const findClosestSocialCat = (maxRange: number): MilkSocialTargetInfo | null => {
+          const maxSq = maxRange * maxRange;
+          let bestRemote: { info: MilkSocialTargetInfo; d2: number } | null = null;
+          if (!hideRemoteCatsRef.current) {
+            for (const entry of remoteEntries.values()) {
+              const dx = entry.sim.x - playerPos.x;
+              const dz = entry.sim.z - playerPos.z;
+              const d2 = dx * dx + dz * dz;
+              if (d2 <= maxSq && (!bestRemote || d2 < bestRemote.d2)) {
+                bestRemote = {
+                  info: {
+                    kind: 'remote',
+                    id: entry.sim.id,
+                    name: formatRemoteCatName(entry.sim.coatId),
+                  },
+                  d2,
+                };
+              }
+            }
+          }
+          if (bestRemote) return bestRemote.info;
+
+          let bestNpc: { info: MilkSocialTargetInfo; d2: number } | null = null;
+          for (const entry of npcEntries) {
+            const dx = entry.state.x - playerPos.x;
+            const dz = entry.state.z - playerPos.z;
+            const d2 = dx * dx + dz * dz;
+            if (d2 <= maxSq && (!bestNpc || d2 < bestNpc.d2)) {
+              bestNpc = {
+                info: {
+                  kind: 'npc',
+                  id: entry.state.spec.id,
+                  name: entry.state.spec.name,
+                },
+                d2,
+              };
+            }
+          }
+          return bestNpc?.info ?? null;
+        };
+
+        const nextGiveTarget = findClosestSocialCat(4.8);
+        const nextVendingTarget = isNearMilkVending(playerPos.x, playerPos.z)
+          ? findClosestSocialCat(8.5)
+          : null;
+        const nextSocialKey = `${nextGiveTarget?.kind ?? ''}:${nextGiveTarget?.id ?? ''}:${nextGiveTarget?.name ?? ''}|${nextVendingTarget?.kind ?? ''}:${nextVendingTarget?.id ?? ''}:${nextVendingTarget?.name ?? ''}`;
+        if (nextSocialKey !== lastSocialTargetsKey) {
+          lastSocialTargetsKey = nextSocialKey;
+          lastNearbyGiveTarget = nextGiveTarget;
+          lastNearbyVendingTarget = nextVendingTarget;
+          onSocialTargetsChangeRef.current?.({
+            nearbyGiveTarget: nextGiveTarget,
+            nearbyVendingTarget: nextVendingTarget,
+          });
+        }
+
+        // Update spatial audio levels (water + cedar/bamboo/waterwheel + purr proximity + indoor attenuation)
         audio.setIndoorAttenuation(zoneNow === 'tatami_hall');
         audio.updateSpatialVolumes(
           computeWaterGain(playerPos.x, playerPos.z),
           computePurrProximity(playerPos.x, playerPos.z, actionMode),
+          computeForestWindGain(playerPos.x, playerPos.z),
         );
 
         // 2. Smooth Day/Night lighting & fog transition
@@ -1702,6 +2492,10 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           hoveredKind: hoveredInteractType,
           nearbyKind: currentNearbyPrompt?.kind ?? null,
           carryingFirewood,
+          footSoakSpot:
+            actionMode === 'footSoak'
+              ? { x: playerPos.x, z: playerPos.z, heading: playerHeading }
+              : null,
         });
 
         // 4. Diorama camera with exponential damping (1 - exp(-dt * 6.5))
@@ -1775,6 +2569,10 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         if (greetNpcTimeoutId !== null) {
           window.clearTimeout(greetNpcTimeoutId);
           greetNpcTimeoutId = null;
+        }
+        if (npcMilkTimeoutId !== null) {
+          window.clearTimeout(npcMilkTimeoutId);
+          npcMilkTimeoutId = null;
         }
 
         audio.dispose();

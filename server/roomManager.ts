@@ -46,6 +46,7 @@ const DEFAULT_INITIAL_STATE: ClientPlayerPayload = {
   moveSpeed: 0,
   hasHeadYuzu: false,
   carryingFirewood: false,
+  heldMilkId: null,
 };
 
 export class RoomManager {
@@ -98,6 +99,17 @@ export class RoomManager {
       if (peer.id !== excludePeerId) {
         peer.send(message);
       }
+    }
+  }
+
+  private sendToPeerInRoom(
+    room: RoomState,
+    targetPeerId: string,
+    message: ServerToClientMessage,
+  ): void {
+    const target = room.peers.get(targetPeerId);
+    if (target) {
+      target.send(message);
     }
   }
 
@@ -252,6 +264,47 @@ export class RoomManager {
           },
           peerId,
         );
+        break;
+      }
+      case 'milk_offer': {
+        this.sendToPeerInRoom(room, message.targetPeerId, {
+          type: 'milk_offer',
+          fromPeerId: peerId,
+          fromCoatId: session.state.coatId,
+          targetPeerId: message.targetPeerId,
+          drinkId: message.drinkId,
+        });
+        break;
+      }
+      case 'milk_respond': {
+        this.sendToPeerInRoom(room, message.toPeerId, {
+          type: 'milk_respond',
+          fromPeerId: peerId,
+          fromCoatId: session.state.coatId,
+          toPeerId: message.toPeerId,
+          drinkId: message.drinkId,
+          accepted: message.accepted,
+        });
+        break;
+      }
+      case 'milk_request': {
+        this.sendToPeerInRoom(room, message.targetPeerId, {
+          type: 'milk_request',
+          fromPeerId: peerId,
+          fromCoatId: session.state.coatId,
+          targetPeerId: message.targetPeerId,
+          drinkId: message.drinkId,
+        });
+        break;
+      }
+      case 'milk_request_decline': {
+        this.sendToPeerInRoom(room, message.toPeerId, {
+          type: 'milk_request_decline',
+          fromPeerId: peerId,
+          fromCoatId: session.state.coatId,
+          toPeerId: message.toPeerId,
+          drinkId: message.drinkId,
+        });
         break;
       }
     }

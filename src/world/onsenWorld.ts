@@ -2,11 +2,29 @@ import * as THREE from 'three';
 import { ProceduralTextureBundle } from './proceduralTextures';
 import { ACTION_SPOTS, WishYuzuItem } from './ritualMath';
 import {
+  BAMBOO_CULMS,
+  BATH_LANTERN_SPOTS,
   BATH_RIM_ROCKS,
+  CEDAR_TREES,
+  FOOTBATH_DECK_HEIGHT,
+  FOOTBATH_DECK_LENGTH,
+  FOOTBATH_DECK_DEPTH,
+  FOOTBATH_DECK_SPECS,
+  FOOTBATH_DECK_YAW,
+  FOOTBATH_EAVE_POST_SPOTS,
+  FOOTBATH_SEAT_SPOTS,
+  FOOTBATH_WATERWHEEL_POS,
+  FOOTBATH_WATER_Y,
+  FOOT_STREAM_BORDER_ROCKS,
   FOOT_STREAM_STEPSTONES,
   LANDMARKS,
+  MYOYEONGAK_CUSHION_LOCAL_COORDS,
+  PATH_LANTERN_SPOTS,
+  WALKWAY_BOARDWALK_IDS,
+  WALKWAY_SEGMENTS,
   WORLD_CENTER_Z,
   YUZU_POND_RIM_ROCKS,
+  distToWalkway,
   footStreamCenterZ,
   groundHeightAt,
   terrainMeshHeightAt,
@@ -21,6 +39,7 @@ export interface InteractionCueState {
   hoveredKind: string | null;
   nearbyKind: string | null;
   carryingFirewood: boolean;
+  footSoakSpot?: { x: number; z: number; heading: number } | null;
 }
 
 export interface OnsenWorldController {
@@ -53,23 +72,6 @@ function seededRand(seed: number): () => number {
     s = (s * 16807) % 2147483647;
     return (s - 1) / 2147483646;
   };
-}
-
-function distToSegment2D(
-  px: number,
-  pz: number,
-  ax: number,
-  az: number,
-  bx: number,
-  bz: number,
-): number {
-  const vx = bx - ax;
-  const vz = bz - az;
-  const wx = px - ax;
-  const wz = pz - az;
-  const lenSq = vx * vx + vz * vz || 1;
-  const t = Math.max(0, Math.min(1, (wx * vx + wz * vz) / lenSq));
-  return Math.hypot(px - (ax + t * vx), pz - (az + t * vz));
 }
 
 export function createOnsenWorld(
@@ -173,6 +175,15 @@ export function createOnsenWorld(
     bumpScale: 0.06,
     roughness: 0.52,
     metalness: 0.08,
+  });
+
+  const mossStoneMat = new THREE.MeshStandardMaterial({
+    color: 0x5c6d56,
+    map: textures.stoneMap,
+    bumpMap: textures.stoneBump,
+    bumpScale: 0.055,
+    roughness: 0.86,
+    metalness: 0.02,
   });
 
   const snowCapMat = new THREE.MeshStandardMaterial({
@@ -284,26 +295,11 @@ export function createOnsenWorld(
 
     tmpColor.copy(cSnow);
 
-    // Flagstone walking trails connecting key landmarks
-    const dMain = distToSegment2D(vx, vz, 0, 35, 0, 12);
-    const dBathToPav = distToSegment2D(vx, vz, 0, -4, 0, -6);
-    const dToYuzu = distToSegment2D(vx, vz, -6, 6, -15, 10);
-    const dToMilk = distToSegment2D(vx, vz, 7, 5, 15, 8);
-    const dToBamboo = distToSegment2D(vx, vz, -1.5, 34, -22, 32.5);
-    const dToFirewood = distToSegment2D(vx, vz, -6.5, -13, -3.5, -26);
-    const dToFootStream = distToSegment2D(vx, vz, 11, 13, 19.5, 26.5);
-    const pathDist = Math.min(
-      dMain,
-      dBathToPav,
-      dToYuzu,
-      dToMilk,
-      dToBamboo,
-      dToFirewood,
-      dToFootStream,
-    );
-    if (pathDist < 2.2) {
-      const blend = Math.max(0, 1 - pathDist / 2.2);
-      tmpColor.lerp(cPath, blend * 0.72);
+    // Flagstone walking trails connecting every landmark
+    const pathDist = Math.max(0, distToWalkway(vx, vz));
+    if (pathDist < 1.35) {
+      const blend = Math.max(0, 1 - pathDist / 1.35);
+      tmpColor.lerp(cPath, blend * 0.78);
     }
 
     // Wet mineral stone beneath bath, yuzu pond, and creek
@@ -341,37 +337,225 @@ export function createOnsenWorld(
   group.add(terrainMesh);
   walkableMeshes.push(terrainMesh);
 
-  // Tobi-ishi stepping stones guiding from bridge to bath, yuzu pond, and milk booth
-  const stepStoneGeo = new THREE.CylinderGeometry(0.65, 0.72, 0.1, 8);
-  const steppingStones: [number, number, number][] = [
-    [0.3, 33.2, 1.15],
-    [-0.35, 31.1, 1.0],
-    [0.25, 29.0, 1.2],
-    [-0.3, 26.8, 1.05],
-    [0.35, 24.6, 1.15],
-    [-0.25, 22.4, 1.0],
-    [0.25, 20.2, 1.2],
-    [-0.3, 18.0, 1.05],
-    [0.2, 15.8, 1.15],
-    [-0.15, 13.7, 1.25],
-    // Branch to yuzu pond
-    [-9.5, 6.2, 0.95],
-    [-11.6, 7.6, 1.0],
-    [-13.6, 8.8, 0.9],
-    // Branch to milk booth
-    [9.6, 5.2, 0.95],
-    [11.4, 6.4, 1.05],
-    [12.8, 7.3, 0.9],
-  ];
-  for (const [sx, sz, sc] of steppingStones) {
-    const st = new THREE.Mesh(stepStoneGeo, wetStoneMat);
-    const sy = terrainMeshHeightAt(sx, sz);
-    st.position.set(sx, sy + 0.03, sz);
-    st.scale.set(sc, 1, sc * 0.85);
-    st.rotation.y = rand() * Math.PI;
-    st.castShadow = false;
-    st.receiveShadow = true;
-    group.add(st);
+  // Realistic temple-style hinoki wooden boardwalks & mossy forest stepping paths
+  const stoneRand = seededRand(91243);
+  const pathDummy = new THREE.Object3D();
+  const boardwalkIds = WALKWAY_BOARDWALK_IDS;
+
+  interface WalkMatrixSpec {
+    mat: THREE.Matrix4;
+    tint?: number;
+  }
+  const plankSpecs: WalkMatrixSpec[] = [];
+  const sleeperSpecs: WalkMatrixSpec[] = [];
+  const trailStoneSpecs: WalkMatrixSpec[] = [];
+  const mossBorderSpecs: WalkMatrixSpec[] = [];
+
+  for (const seg of WALKWAY_SEGMENTS) {
+    const dx = seg.bx - seg.ax;
+    const dz = seg.bz - seg.az;
+    const segLen = Math.hypot(dx, dz);
+    const dirX = dx / (segLen || 1);
+    const dirZ = dz / (segLen || 1);
+    const perpX = -dirZ;
+    const perpZ = dirX;
+    const segYaw = Math.atan2(dirX, dirZ);
+
+    if (boardwalkIds.has(seg.id)) {
+      // Side stringer rails / timber sleepers supporting the boardwalk
+      const railSpan = 1.6;
+      const railCount = Math.max(1, Math.round(segLen / railSpan));
+      for (let r = 0; r < railCount; r++) {
+        const t0 = r / railCount;
+        const t1 = (r + 1) / railCount;
+        const tm = (t0 + t1) * 0.5;
+        const rx = seg.ax + dx * tm;
+        const rz = seg.az + dz * tm;
+        const ry = terrainMeshHeightAt(rx, rz);
+        const railLen = (segLen / railCount) * 1.03;
+        for (const side of [-1, 1]) {
+          const offset = side * seg.width * 0.34;
+          pathDummy.position.set(
+            rx + perpX * offset,
+            ry + 0.018,
+            rz + perpZ * offset,
+          );
+          pathDummy.rotation.set(0, segYaw, 0);
+          pathDummy.scale.set(0.11, 0.055, railLen);
+          pathDummy.updateMatrix();
+          sleeperSpecs.push({ mat: pathDummy.matrix.clone() });
+        }
+      }
+
+      // Closely spaced hinoki timber deck cross-planks with gentle organic variance
+      const plankSpacing = 0.42;
+      const count = Math.max(2, Math.floor(segLen / plankSpacing));
+      for (let k = 0; k <= count; k++) {
+        const t = k / count;
+        const px = seg.ax + dx * t;
+        const pz = seg.az + dz * t;
+        const py = terrainMeshHeightAt(px, pz);
+        const plankW = seg.width * (0.76 + (stoneRand() - 0.5) * 0.04);
+        pathDummy.position.set(
+          px,
+          py + 0.032 + (stoneRand() - 0.5) * 0.008,
+          pz,
+        );
+        pathDummy.rotation.set(
+          (stoneRand() - 0.5) * 0.015,
+          segYaw + (stoneRand() - 0.5) * 0.03,
+          (stoneRand() - 0.5) * 0.018,
+        );
+        pathDummy.scale.set(plankW, 0.042, 0.34);
+        pathDummy.updateMatrix();
+        plankSpecs.push({
+          mat: pathDummy.matrix.clone(),
+          tint: 0.9 + stoneRand() * 0.14,
+        });
+
+        // Scattered wet river stones & moss boulders edging the wooden boardwalk
+        if (k % 3 === 0 && stoneRand() > 0.28) {
+          const side = stoneRand() > 0.5 ? 1 : -1;
+          const borderDist = seg.width * 0.46 + 0.18 + stoneRand() * 0.28;
+          const sx = px + perpX * side * borderDist;
+          const sz = pz + perpZ * side * borderDist;
+          const sy = terrainMeshHeightAt(sx, sz);
+          const sc = 0.24 + stoneRand() * 0.22;
+          pathDummy.position.set(sx, sy + sc * 0.25, sz);
+          pathDummy.rotation.set(
+            stoneRand() * 0.3,
+            stoneRand() * Math.PI * 2,
+            stoneRand() * 0.3,
+          );
+          pathDummy.scale.set(sc * 1.25, sc * 0.65, sc);
+          pathDummy.updateMatrix();
+          if (stoneRand() > 0.48) {
+            mossBorderSpecs.push({ mat: pathDummy.matrix.clone() });
+          } else {
+            trailStoneSpecs.push({ mat: pathDummy.matrix.clone() });
+          }
+        }
+      }
+    } else {
+      // Forest & outdoor trails: alternating charred timber sleeper steps & broad flagstones
+      const count = Math.max(2, Math.floor(segLen / 1.05));
+      for (let k = 0; k <= count; k++) {
+        const t = k / count;
+        const stagger = (k % 2 === 0 ? 1 : -1) * Math.min(0.22, seg.width * 0.11);
+        const sx = seg.ax + dx * t + perpX * stagger;
+        const sz = seg.az + dz * t + perpZ * stagger;
+        const sy = terrainMeshHeightAt(sx, sz);
+
+        if (k % 3 === 0) {
+          // Half-log timber trail sleeper anchored into the earth
+          pathDummy.position.set(sx, sy + 0.032, sz);
+          pathDummy.rotation.set(0, segYaw + (stoneRand() - 0.5) * 0.06, 0);
+          pathDummy.scale.set(seg.width * 0.7, 0.065, 0.42);
+          pathDummy.updateMatrix();
+          sleeperSpecs.push({ mat: pathDummy.matrix.clone() });
+        } else {
+          // Flat broad garden stepping slab
+          const sc = 0.54 + stoneRand() * 0.22;
+          pathDummy.position.set(sx, sy + 0.022, sz);
+          pathDummy.rotation.set(0, stoneRand() * Math.PI, 0);
+          pathDummy.scale.set(sc * 1.15, 0.075, sc * (0.85 + stoneRand() * 0.22));
+          pathDummy.updateMatrix();
+          trailStoneSpecs.push({ mat: pathDummy.matrix.clone() });
+        }
+
+        // Moss-covered edge rocks along the trail curve
+        if (k % 2 === 1 && stoneRand() > 0.32) {
+          const side = k % 4 === 1 ? 1 : -1;
+          const borderDist = seg.width * 0.48 + 0.16 + stoneRand() * 0.25;
+          const mx = seg.ax + dx * t + perpX * side * borderDist;
+          const mz = seg.az + dz * t + perpZ * side * borderDist;
+          const my = terrainMeshHeightAt(mx, mz);
+          const sc = 0.26 + stoneRand() * 0.22;
+          pathDummy.position.set(mx, my + sc * 0.26, mz);
+          pathDummy.rotation.set(stoneRand() * 0.3, stoneRand() * Math.PI * 2, 0);
+          pathDummy.scale.set(sc * 1.2, sc * 0.72, sc * 1.05);
+          pathDummy.updateMatrix();
+          mossBorderSpecs.push({ mat: pathDummy.matrix.clone() });
+        }
+      }
+    }
+  }
+
+  if (plankSpecs.length > 0) {
+    const plankGeo = new THREE.BoxGeometry(1, 1, 1);
+    const plankInst = new THREE.InstancedMesh(plankGeo, hinokiMat, plankSpecs.length);
+    plankInst.receiveShadow = true;
+    plankInst.castShadow = false;
+    const plankColor = new THREE.Color();
+    plankSpecs.forEach((s, idx) => {
+      plankInst.setMatrixAt(idx, s.mat);
+      const t = s.tint ?? 1;
+      plankColor.setRGB(t, t * 0.96, t * 0.9);
+      plankInst.setColorAt(idx, plankColor);
+    });
+    plankInst.computeBoundingSphere();
+    group.add(plankInst);
+  }
+
+  if (sleeperSpecs.length > 0) {
+    const sleeperGeo = new THREE.BoxGeometry(1, 1, 1);
+    const sleeperInst = new THREE.InstancedMesh(
+      sleeperGeo,
+      darkTimberMat,
+      sleeperSpecs.length,
+    );
+    sleeperInst.receiveShadow = true;
+    sleeperInst.castShadow = false;
+    sleeperSpecs.forEach((s, idx) => sleeperInst.setMatrixAt(idx, s.mat));
+    sleeperInst.computeBoundingSphere();
+    group.add(sleeperInst);
+  }
+
+  if (trailStoneSpecs.length > 0) {
+    const stoneGeo = new THREE.CylinderGeometry(0.95, 1.05, 1, 8);
+    const stoneInst = new THREE.InstancedMesh(
+      stoneGeo,
+      wetStoneMat,
+      trailStoneSpecs.length,
+    );
+    stoneInst.receiveShadow = true;
+    stoneInst.castShadow = false;
+    trailStoneSpecs.forEach((s, idx) => stoneInst.setMatrixAt(idx, s.mat));
+    stoneInst.computeBoundingSphere();
+    group.add(stoneInst);
+  }
+
+  if (mossBorderSpecs.length > 0) {
+    const mossGeo = new THREE.DodecahedronGeometry(0.9, 0);
+    const mossInst = new THREE.InstancedMesh(
+      mossGeo,
+      mossStoneMat,
+      mossBorderSpecs.length,
+    );
+    mossInst.receiveShadow = true;
+    mossInst.castShadow = false;
+    mossBorderSpecs.forEach((s, idx) => mossInst.setMatrixAt(idx, s.mat));
+    mossInst.computeBoundingSphere();
+    group.add(mossInst);
+  }
+
+  // Warm timber path-guide lanterns along walkways
+  for (const [lx, lz] of PATH_LANTERN_SPOTS) {
+    const ly = terrainMeshHeightAt(lx, lz);
+    const plinth = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.23, 0.14, 7),
+      wetStoneMat,
+    );
+    plinth.position.set(lx, ly + 0.07, lz);
+    plinth.castShadow = false;
+    plinth.receiveShadow = true;
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.065, 0.08, 0.95, 7),
+      darkTimberMat,
+    );
+    post.position.set(lx, ly + 0.58, lz);
+    post.castShadow = false;
+    group.add(plinth, post, createLantern(lx, ly + 1.15, lz, 0.17, 0.28, 4.8, 13));
   }
 
   // =========================================================================
@@ -550,13 +734,7 @@ export function createOnsenWorld(
   bathGroup.add(bathNightLight);
   nightLights.push({ light: bathNightLight, baseIntensity: 16 });
 
-  const bathLanternSpots = [
-    [-5.4, 8.2],
-    [5.4, 8.2],
-    [-6.6, -6.8],
-    [6.6, -6.8],
-  ];
-  for (const [lx, lz] of bathLanternSpots) {
+  for (const [lx, lz] of BATH_LANTERN_SPOTS) {
     const post = new THREE.Mesh(
       new THREE.CylinderGeometry(0.18, 0.24, 0.75, 6),
       wetStoneMat,
@@ -568,18 +746,18 @@ export function createOnsenWorld(
   }
 
   // =========================================================================
-  // 3. MYOYEONGAK PAVILION (0, -12) — WOODEN & TATAMI RESTING HALL
+  // 3. MYOYEONGAK PAVILION (0, -36) — EXPANDED WOODEN & TATAMI RESTING HALL (16 CUSHIONS)
   // =========================================================================
   const pavGroup = new THREE.Group();
   pavGroup.position.set(LANDMARKS.myoyeongak.x, 0, LANDMARKS.myoyeongak.z);
   group.add(pavGroup);
 
-  // Raised timber deck platform
+  // Raised timber deck platform (19.6m x 14.4m)
   const deckMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(12.8, 0.56, 9.6),
+    new THREE.BoxGeometry(19.6, 0.56, 14.4),
     darkTimberMat,
   );
-  deckMesh.position.set(0, 0.16, 0.4);
+  deckMesh.position.set(0, 0.16, 0);
   deckMesh.receiveShadow = true;
   deckMesh.castShadow = true;
   pavGroup.add(deckMesh);
@@ -588,18 +766,18 @@ export function createOnsenWorld(
   // Front wooden steps facing +Z toward bath
   for (let s = 0; s < 3; s++) {
     const step = new THREE.Mesh(
-      new THREE.BoxGeometry(5.6, 0.16, 0.65),
+      new THREE.BoxGeometry(6.8, 0.16, 0.65),
       hinokiMat,
     );
-    step.position.set(0, 0.08 + s * 0.13, 6.9 - s * 0.65);
+    step.position.set(0, 0.08 + s * 0.13, 8.5 - s * 0.65);
     step.receiveShadow = true;
     pavGroup.add(step);
     walkableMeshes.push(step);
   }
 
-  // Tatami interior floor
+  // Tatami interior floor (17.2m x 12.0m)
   const tatamiFloor = new THREE.Mesh(
-    new THREE.BoxGeometry(10.6, 0.04, 7.2),
+    new THREE.BoxGeometry(17.2, 0.04, 12.0),
     tatamiMat,
   );
   tatamiFloor.position.set(0, 0.45, -0.4);
@@ -607,15 +785,17 @@ export function createOnsenWorld(
   pavGroup.add(tatamiFloor);
   walkableMeshes.push(tatamiFloor);
 
-  // Timber pillars (6)
+  // Timber pillars (8)
   const pillarGeo = new THREE.CylinderGeometry(0.18, 0.2, 3.2, 8);
   const pillarCoords = [
-    [-5.5, 3.6],
-    [5.5, 3.6],
-    [-5.5, 0],
-    [5.5, 0],
-    [-5.5, -3.8],
-    [5.5, -3.8],
+    [-8.6, 5.8],
+    [8.6, 5.8],
+    [-8.6, 1.8],
+    [8.6, 1.8],
+    [-8.6, -2.2],
+    [8.6, -2.2],
+    [-8.6, -6.2],
+    [8.6, -6.2],
   ];
   for (const [px, pz] of pillarCoords) {
     const pillar = new THREE.Mesh(pillarGeo, darkTimberMat);
@@ -627,71 +807,111 @@ export function createOnsenWorld(
 
   // Translucent glowing shoji walls (back & sides)
   const backShoji = new THREE.Mesh(
-    new THREE.BoxGeometry(10.8, 2.8, 0.14),
+    new THREE.BoxGeometry(17.4, 2.8, 0.14),
     shojiMat,
   );
-  backShoji.position.set(0, 1.85, -3.9);
+  backShoji.position.set(0, 1.85, -6.3);
   pavGroup.add(backShoji);
 
   const leftShoji = new THREE.Mesh(
-    new THREE.BoxGeometry(0.14, 2.8, 7.5),
+    new THREE.BoxGeometry(0.14, 2.8, 12.2),
     shojiMat,
   );
-  leftShoji.position.set(-5.5, 1.85, -0.2);
+  leftShoji.position.set(-8.6, 1.85, -0.2);
   const rightShoji = leftShoji.clone();
-  rightShoji.position.x = 5.5;
+  rightShoji.position.x = 8.6;
   pavGroup.add(leftShoji, rightShoji);
 
-  // Tiered overhanging roof + snow cover (darker slate eave overhang pops cleanly)
+  // Tiered overhanging roof + snow cover
   const lowerRoof = new THREE.Mesh(
-    new THREE.ConeGeometry(10.1, 2.25, 4),
+    new THREE.ConeGeometry(14.8, 2.5, 4),
     roofTileMat,
   );
   lowerRoof.rotation.y = Math.PI / 4;
-  lowerRoof.scale.set(1.14, 1.0, 0.9);
-  lowerRoof.position.set(0, 4.35, 0.2);
+  lowerRoof.scale.set(1.18, 1.0, 0.92);
+  lowerRoof.position.set(0, 4.45, 0.2);
   lowerRoof.castShadow = true;
   lowerRoof.receiveShadow = true;
   pavGroup.add(lowerRoof);
 
   const upperRoofSnow = new THREE.Mesh(
-    new THREE.ConeGeometry(9.0, 1.85, 4),
+    new THREE.ConeGeometry(13.4, 2.05, 4),
     snowCapMat,
   );
   upperRoofSnow.rotation.y = Math.PI / 4;
-  upperRoofSnow.scale.set(1.02, 0.88, 0.8);
-  upperRoofSnow.position.set(0, 4.72, 0.2);
+  upperRoofSnow.scale.set(1.06, 0.88, 0.82);
+  upperRoofSnow.position.set(0, 4.86, 0.2);
   upperRoofSnow.castShadow = false;
   upperRoofSnow.receiveShadow = true;
   pavGroup.add(upperRoofSnow);
 
   const ridgeBeam = new THREE.Mesh(
-    new THREE.BoxGeometry(6.8, 0.35, 0.45),
+    new THREE.BoxGeometry(10.2, 0.38, 0.48),
     darkTimberMat,
   );
-  ridgeBeam.position.set(0, 5.55, 0.2);
+  ridgeBeam.position.set(0, 5.75, 0.2);
   pavGroup.add(ridgeBeam);
 
-  // Cozy floor cushions (zabuton) + central hearth embers
-  const cushionMat = new THREE.MeshStandardMaterial({
-    color: 0xb64b3b,
-    roughness: 0.88,
+  // Central sunken irori hearth on the tatami floor
+  const iroriGroup = new THREE.Group();
+  iroriGroup.position.set(0, 0.47, -0.4);
+  pavGroup.add(iroriGroup);
+
+  const iroriFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(2.1, 0.12, 2.1),
+    darkTimberMat,
+  );
+  iroriFrame.receiveShadow = true;
+  const iroriAsh = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 0.13, 1.6),
+    wetStoneMat,
+  );
+  const iroriEmberMat = new THREE.MeshStandardMaterial({
+    color: 0x3b2218,
+    emissive: 0xff5a1f,
+    emissiveIntensity: 0.95,
+    roughness: 0.85,
   });
-  const cushionGeo = new THREE.BoxGeometry(0.85, 0.1, 0.85);
-  for (const [cx, cz] of [
-    [-2.4, -0.5],
-    [2.4, -0.5],
-    [-2.4, 1.6],
-    [2.4, 1.6],
-  ]) {
-    const cushion = new THREE.Mesh(cushionGeo, cushionMat);
-    cushion.position.set(cx, 0.51, cz);
-    pavGroup.add(cushion);
-  }
+  const iroriEmbers = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.45, 0.55, 0.14, 10),
+    iroriEmberMat,
+  );
+  iroriEmbers.position.y = 0.04;
+  iroriGroup.add(iroriFrame, iroriAsh, iroriEmbers);
+
+  const iroriLight = new THREE.PointLight('#ff8a36', 3.5, 14, 1.4);
+  iroriLight.position.set(0, 1.1, -0.4);
+  iroriLight.castShadow = false;
+  pavGroup.add(iroriLight);
+
+  // 16 cozy floor cushions (zabuton) arranged in 4 warm traditional colors
+  const cushionColors = [0xb64b3b, 0xc87d28, 0x4b6e58, 0x7a4b3a];
+  const cushionMats = cushionColors.map(
+    (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.88 }),
+  );
+  const cushionMat = cushionMats[0];
+  const tuftMat = new THREE.MeshStandardMaterial({
+    color: 0xf4ead8,
+    roughness: 0.82,
+  });
+  const cushionGeo = new THREE.BoxGeometry(0.95, 0.06, 0.95);
+  const tuftGeo = new THREE.BoxGeometry(0.22, 0.066, 0.22);
+  MYOYEONGAK_CUSHION_LOCAL_COORDS.forEach(([cx, cz], idx) => {
+    const cushion = new THREE.Mesh(cushionGeo, cushionMats[idx % cushionMats.length]);
+    cushion.position.set(cx, 0.47, cz);
+    cushion.castShadow = false;
+    cushion.receiveShadow = true;
+    cushion.userData.interactType = 'tatami_cushion';
+    cushion.userData.cushionIndex = idx;
+    interactables.push(cushion);
+    const tuft = new THREE.Mesh(tuftGeo, tuftMat);
+    tuft.position.set(cx, 0.472, cz);
+    pavGroup.add(cushion, tuft);
+  });
 
   // Hanging eaves lanterns & warm interior glow
-  pavGroup.add(createLantern(-3.8, 2.95, 4.2, 0.24, 0.42, 9.0, 18));
-  pavGroup.add(createLantern(3.8, 2.95, 4.2, 0.24, 0.42, 9.0, 18));
+  pavGroup.add(createLantern(-5.2, 2.95, 6.4, 0.24, 0.42, 9.5, 18));
+  pavGroup.add(createLantern(5.2, 2.95, 6.4, 0.24, 0.42, 9.5, 18));
 
   // =========================================================================
   // 4. YUZU WISH POND (-18, 10)
@@ -947,8 +1167,8 @@ export function createOnsenWorld(
     benchGroup.add(leg);
   }
 
-  const benchCloth = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.03, 1.85), cushionMat);
-  benchCloth.position.set(0.35, 0.35, 0);
+  const benchCloth = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.016, 1.85), cushionMat);
+  benchCloth.position.set(0.35, 0.342, 0);
   benchCloth.userData.interactType = 'milk_bench';
   benchGroup.add(benchCloth);
   interactables.push(benchCloth);
@@ -1008,7 +1228,7 @@ export function createOnsenWorld(
     roughness: 0.62,
     metalness: 0.04,
   });
-  const bambooCount = 42;
+  const bambooCount = BAMBOO_CULMS.length;
   const bambooCulmGeo = new THREE.CylinderGeometry(0.07, 0.095, 6.2, 8);
   bambooCulmGeo.translate(0, 3.1, 0);
   const bambooInst = new THREE.InstancedMesh(bambooCulmGeo, bambooMat, bambooCount);
@@ -1027,55 +1247,21 @@ export function createOnsenWorld(
   );
 
   const dummy = new THREE.Object3D();
-  for (let i = 0; i < bambooCount; i++) {
-    let bx = -2.8;
-    let bz = 2.8;
-    let placed = false;
+  BAMBOO_CULMS.forEach((b, i) => {
+    const by = groundHeightAt(b.x, b.z);
 
-    for (let attempt = 0; attempt < 24; attempt++) {
-      const angle = rand() * Math.PI * 2;
-      const rad = 2.2 + rand() * 5.6;
-      const candX = Math.cos(angle) * rad;
-      const candZ = Math.sin(angle) * rad;
-      const worldX = LANDMARKS.bambooShishi.x + candX;
-      const worldZ = LANDMARKS.bambooShishi.z + candZ;
-
-      const tooCloseToBasin = Math.hypot(candX - 1.5, candZ + 1.5) < 1.55;
-      // Leave the SE arrival clearing & camera orbit corridor open around (-20.2, 30.8)
-      const inCameraCorridor =
-        Math.hypot(worldX + 19.2, worldZ - 29.5) < 4.5 ||
-        (candX > 1.2 && candZ < 0.8);
-
-      if (!tooCloseToBasin && !inCameraCorridor) {
-        bx = candX;
-        bz = candZ;
-        placed = true;
-        break;
-      }
-    }
-
-    if (!placed) {
-      const fallbackAngle = Math.PI * 0.55 + (i / bambooCount) * Math.PI * 1.1;
-      const fallbackRad = 3.2 + (i % 4) * 1.1;
-      bx = Math.cos(fallbackAngle) * fallbackRad;
-      bz = Math.sin(fallbackAngle) * fallbackRad;
-    }
-
-    const by = groundHeightAt(LANDMARKS.bambooShishi.x + bx, LANDMARKS.bambooShishi.z + bz);
-    const hScale = 0.72 + rand() * 0.55;
-
-    dummy.position.set(bx, by - 0.1, bz);
-    dummy.rotation.set((rand() - 0.5) * 0.1, rand() * Math.PI, (rand() - 0.5) * 0.1);
-    dummy.scale.set(0.85 + rand() * 0.3, hScale, 0.85 + rand() * 0.3);
+    dummy.position.set(b.lx, by - 0.1, b.lz);
+    dummy.rotation.set(b.rotX, b.rotY, b.rotZ);
+    dummy.scale.set(b.radiusScale, b.heightScale, b.radiusScale);
     dummy.updateMatrix();
     bambooInst.setMatrixAt(i, dummy.matrix);
 
-    dummy.position.set(bx, by + 5.6 * hScale, bz);
-    dummy.rotation.set(0, rand() * Math.PI, 0);
-    dummy.scale.setScalar(0.85 + rand() * 0.35);
+    dummy.position.set(b.lx, by + 5.6 * b.heightScale, b.lz);
+    dummy.rotation.set(0, b.leafRotY, 0);
+    dummy.scale.setScalar(b.leafScale);
     dummy.updateMatrix();
     bambooLeafInst.setMatrixAt(i, dummy.matrix);
-  }
+  });
   bambooInst.computeBoundingSphere();
   bambooLeafInst.computeBoundingSphere();
   bambooGroup.add(bambooInst, bambooLeafInst);
@@ -1202,7 +1388,7 @@ export function createOnsenWorld(
   bridgeGroup.add(createLantern(2.02, 1.15, 3.6, 0.19, 0.3, 6.0, 14));
 
   // Creek water ribbon running East-West underneath the bridge
-  const creekGeo = new THREE.PlaneGeometry(76, 5.5, 24, 4);
+  const creekGeo = new THREE.PlaneGeometry(118, 5.8, 32, 4);
   creekGeo.rotateX(-Math.PI / 2);
   const cPos = creekGeo.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < cPos.count; i++) {
@@ -1211,7 +1397,7 @@ export function createOnsenWorld(
   }
   creekGeo.computeVertexNormals();
   const creekWater = new THREE.Mesh(creekGeo, pondWaterMat);
-  creekWater.position.set(0, -0.14, 38);
+  creekWater.position.set(0, -0.14, LANDMARKS.entranceBridge.z);
   group.add(creekWater);
 
   // =========================================================================
@@ -1470,7 +1656,7 @@ export function createOnsenWorld(
   let furnaceBoostTimer = 0;
   let stokedLogsCount = 0;
   const stokeFirewood = () => {
-    furnaceBoostTimer = 10.0;
+    furnaceBoostTimer = 14.0;
     stokedLogsCount = Math.min(8, stokedLogsCount + 1);
   };
 
@@ -1614,16 +1800,16 @@ export function createOnsenWorld(
   };
 
   // =========================================================================
-  // 7d. EASTERN FOOTBATH STREAM & STEPPING STONES (22, 28)
+  // 7d. EASTERN OUTDOOR 2x6 HINOKI FOOTBATH DECKS & WATERWHEEL SHELTER
   // =========================================================================
   const footStreamGroup = new THREE.Group();
   group.add(footStreamGroup);
 
-  const footStreamGeo = new THREE.PlaneGeometry(12.2, 2.9, 24, 4);
+  const footStreamGeo = new THREE.PlaneGeometry(15.6, 2.95, 32, 4);
   footStreamGeo.rotateX(-Math.PI / 2);
   const fsPos = footStreamGeo.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < fsPos.count; i++) {
-    const wx = LANDMARKS.footStream.x + fsPos.getX(i);
+    const wx = LANDMARKS.footStream.x + 1.0 + fsPos.getX(i);
     const localZ = fsPos.getZ(i);
     fsPos.setX(i, wx);
     fsPos.setZ(i, footStreamCenterZ(wx) + localZ);
@@ -1631,7 +1817,7 @@ export function createOnsenWorld(
   footStreamGeo.computeVertexNormals();
   const footStreamMat = createWaterMaterial('#8cc5ca', 0.85);
   const footStreamMesh = new THREE.Mesh(footStreamGeo, footStreamMat);
-  footStreamMesh.position.y = -0.045;
+  footStreamMesh.position.y = FOOTBATH_WATER_Y;
   footStreamMesh.receiveShadow = true;
   footStreamGroup.add(footStreamMesh);
 
@@ -1639,7 +1825,7 @@ export function createOnsenWorld(
   const fsStoneGeo = new THREE.CylinderGeometry(0.54, 0.6, 0.14, 10);
   for (const stSpec of FOOT_STREAM_STEPSTONES) {
     const st = new THREE.Mesh(fsStoneGeo, wetStoneMat);
-    st.position.set(stSpec.x, -0.015, stSpec.z);
+    st.position.set(stSpec.x, 0.005, stSpec.z);
     st.scale.set(stSpec.r / 0.55, 1.0, (stSpec.r / 0.55) * 0.88);
     st.rotation.y = rand() * Math.PI;
     st.castShadow = false;
@@ -1648,118 +1834,533 @@ export function createOnsenWorld(
     walkableMeshes.push(st);
   }
 
-  // Border wet stones along the eastern footbath stream (castShadow = false)
-  for (let i = 0; i < 16; i++) {
-    const sx = 16.4 + (i / 15) * 11.2;
-    const side = i % 2 === 0 ? 1 : -1;
-    const sz = footStreamCenterZ(sx) + side * (1.55 + rand() * 0.35);
+  // Border wet stones along the eastern footbath stream (avoiding decks & waterwheel)
+  for (const fr of FOOT_STREAM_BORDER_ROCKS) {
     const rock = new THREE.Mesh(rockGeo, wetStoneMat);
-    rock.position.set(sx, 0.04, sz);
-    rock.scale.set(0.45 + rand() * 0.25, 0.28 + rand() * 0.16, 0.45 + rand() * 0.25);
-    rock.rotation.y = rand() * Math.PI;
+    rock.position.set(fr.x, 0.04, fr.z);
+    rock.scale.set(fr.sx, fr.sy, fr.sz);
+    rock.rotation.y = fr.rotY;
     rock.castShadow = false;
     rock.receiveShadow = true;
     footStreamGroup.add(rock);
   }
 
-  // Footbath timber signpost & warm lantern post
-  const fsPost = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.11, 0.13, 1.25, 6),
-    darkTimberMat,
-  );
-  fsPost.position.set(18.6, 0.62, 24.8);
-  fsPost.castShadow = false;
-  footStreamGroup.add(fsPost);
-  footStreamGroup.add(createLantern(18.6, 1.38, 24.8, 0.19, 0.3, 6.5, 14));
+  // Footbath 2x6 facing hinoki decks in local stream frame (u, v)
+  const footbathHub = new THREE.Group();
+  footbathHub.position.set(LANDMARKS.footStream.x, 0, LANDMARKS.footStream.z);
+  footbathHub.rotation.y = FOOTBATH_DECK_YAW;
+  footStreamGroup.add(footbathHub);
 
-  // =========================================================================
-  // 8. SNOWY CEDAR FOREST (INSTANCED)
-  // =========================================================================
-  const cedarCoords: { x: number; z: number; s: number }[] = [];
-  let attempts = 0;
-  while (cedarCoords.length < 96 && attempts < 900) {
-    attempts++;
-    const angle = rand() * Math.PI * 2;
-    const rad = 22 + rand() * 38;
-    const tx = Math.cos(angle) * rad;
-    const tz = WORLD_CENTER_Z + Math.sin(angle) * rad;
+  const footbathSeatColors = [0xc95e3d, 0x6f8b67, 0xd4a459];
+  const footbathCushionGeo = new THREE.CylinderGeometry(0.32, 0.34, 0.03, 14);
+  const towelFoldGeo = new THREE.BoxGeometry(0.22, 0.03, 0.32);
+  const footTowelMat = new THREE.MeshStandardMaterial({
+    color: 0xf4efe4,
+    roughness: 0.9,
+  });
 
-    // Keep central corridor & landmarks completely open
-    if (Math.abs(tx) < 7.5 && tz > -20 && tz < 46) continue;
-    if (Math.hypot(tx - LANDMARKS.mainBath.x, tz - LANDMARKS.mainBath.z) < 15.5) continue;
-    if (Math.hypot(tx - LANDMARKS.myoyeongak.x, tz - LANDMARKS.myoyeongak.z) < 12) continue;
-    if (Math.hypot(tx - LANDMARKS.yuzuPond.x, tz - LANDMARKS.yuzuPond.z) < 8.5) continue;
-    if (Math.hypot(tx - LANDMARKS.milkBooth.x, tz - LANDMARKS.milkBooth.z) < 8.5) continue;
-    if (Math.hypot(tx - LANDMARKS.bambooShishi.x, tz - LANDMARKS.bambooShishi.z) < 10.5) continue;
-    if (Math.hypot(tx - LANDMARKS.firewoodYard.x, tz - LANDMARKS.firewoodYard.z) < 9.5) continue;
-    if (Math.hypot(tx - LANDMARKS.footStream.x, tz - LANDMARKS.footStream.z) < 9.5) continue;
+  for (const deck of FOOTBATH_DECK_SPECS) {
+    const deckGroup = new THREE.Group();
+    deckGroup.position.set(0, 0, deck.centerV);
+    footbathHub.add(deckGroup);
 
-    cedarCoords.push({ x: tx, z: tz, s: 0.85 + rand() * 0.45 });
+    // Main hinoki deck slab (top precisely matches FOOTBATH_DECK_HEIGHT = 0.18)
+    const deckSlab = new THREE.Mesh(
+      new THREE.BoxGeometry(FOOTBATH_DECK_LENGTH, 0.08, FOOTBATH_DECK_DEPTH),
+      hinokiMat,
+    );
+    deckSlab.position.y = FOOTBATH_DECK_HEIGHT - 0.04;
+    deckSlab.castShadow = true;
+    deckSlab.receiveShadow = true;
+    deckSlab.userData.interactType = 'footbath_seat';
+    deckGroup.add(deckSlab);
+    walkableMeshes.push(deckSlab);
+    interactables.push(deckSlab);
+
+    // Subtle timber edge stringer & support pilings down into snow/bank
+    const trimBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(FOOTBATH_DECK_LENGTH + 0.06, 0.06, FOOTBATH_DECK_DEPTH + 0.04),
+      darkTimberMat,
+    );
+    trimBeam.position.y = FOOTBATH_DECK_HEIGHT - 0.095;
+    trimBeam.castShadow = false;
+    trimBeam.receiveShadow = true;
+    deckGroup.add(trimBeam);
+
+    for (const pu of [-4.2, -1.4, 1.4, 4.2]) {
+      for (const pv of [-0.52, 0.52]) {
+        const post = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.065, 0.075, 0.28, 6),
+          darkTimberMat,
+        );
+        post.position.set(pu, -0.02, pv);
+        post.castShadow = false;
+        deckGroup.add(post);
+      }
+    }
+
+    // Gentle side access steps at both deck ends (top matches groundHeightAt 0.10m)
+    for (const endU of [-FOOTBATH_DECK_LENGTH * 0.5 - 0.38, FOOTBATH_DECK_LENGTH * 0.5 + 0.38]) {
+      const step = new THREE.Mesh(
+        new THREE.BoxGeometry(0.76, 0.1, FOOTBATH_DECK_DEPTH * 0.86),
+        hinokiMat,
+      );
+      step.position.set(endU, 0.05, 0);
+      step.castShadow = true;
+      step.receiveShadow = true;
+      deckGroup.add(step);
+      walkableMeshes.push(step);
+    }
+
+    // Open-front NW timber eave shelter with hanging warm lanterns (posts set back at v = -2.52)
+    if (deck.hasEave) {
+      const eaveGroup = new THREE.Group();
+      footbathHub.add(eaveGroup);
+
+      for (let i = 0; i < FOOTBATH_EAVE_POST_SPOTS.length; i++) {
+        const postU = [-4.3, 0, 4.3][i];
+        const post = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.095, 0.11, 2.32, 8),
+          darkTimberMat,
+        );
+        post.position.set(postU, FOOTBATH_DECK_HEIGHT + 1.06, -2.52);
+        post.castShadow = true;
+        eaveGroup.add(post);
+
+        // Diagonal wooden bracket supporting the open cantilever roof
+        const brace = new THREE.Mesh(
+          new THREE.BoxGeometry(0.09, 0.09, 1.15),
+          darkTimberMat,
+        );
+        brace.position.set(postU, FOOTBATH_DECK_HEIGHT + 1.88, -1.96);
+        brace.rotation.x = 0.44;
+        eaveGroup.add(brace);
+      }
+
+      const ridgeBeam = new THREE.Mesh(
+        new THREE.BoxGeometry(FOOTBATH_DECK_LENGTH + 0.4, 0.14, 0.16),
+        darkTimberMat,
+      );
+      ridgeBeam.position.set(0, FOOTBATH_DECK_HEIGHT + 2.18, -2.5);
+      eaveGroup.add(ridgeBeam);
+
+      const frontBeam = new THREE.Mesh(
+        new THREE.BoxGeometry(FOOTBATH_DECK_LENGTH + 0.4, 0.11, 0.12),
+        darkTimberMat,
+      );
+      frontBeam.position.set(0, FOOTBATH_DECK_HEIGHT + 1.98, -1.24);
+      eaveGroup.add(frontBeam);
+
+      const roofSlope = new THREE.Mesh(
+        new THREE.BoxGeometry(FOOTBATH_DECK_LENGTH + 0.8, 0.1, 2.15),
+        roofTileMat,
+      );
+      roofSlope.position.set(0, FOOTBATH_DECK_HEIGHT + 2.14, -1.92);
+      roofSlope.rotation.x = 0.18;
+      roofSlope.castShadow = true;
+      roofSlope.receiveShadow = true;
+      eaveGroup.add(roofSlope);
+
+      const snowRoof = new THREE.Mesh(
+        new THREE.BoxGeometry(FOOTBATH_DECK_LENGTH + 0.68, 0.065, 2.02),
+        snowCapMat,
+      );
+      snowRoof.position.set(0, FOOTBATH_DECK_HEIGHT + 2.21, -1.92);
+      snowRoof.rotation.x = 0.18;
+      snowRoof.receiveShadow = true;
+      eaveGroup.add(snowRoof);
+
+      // Warm amber hanging lanterns under the open front eave
+      for (const lanternU of [-3.4, 0, 3.4]) {
+        const hanger = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.012, 0.012, 0.24, 5),
+          darkTimberMat,
+        );
+        hanger.position.set(lanternU, FOOTBATH_DECK_HEIGHT + 1.84, -1.24);
+        eaveGroup.add(hanger);
+
+        eaveGroup.add(
+          createLantern(
+            lanternU,
+            FOOTBATH_DECK_HEIGHT + 1.62,
+            -1.24,
+            0.15,
+            0.26,
+            4.2,
+            12.5,
+          ),
+        );
+      }
+    }
   }
 
-  const trunkGeo = new THREE.CylinderGeometry(0.22, 0.36, 4.0, 7);
-  trunkGeo.translate(0, 2.0, 0);
-  const trunkMat = new THREE.MeshStandardMaterial({
-    color: 0x4d3829,
-    roughness: 0.92,
+  // 12 interactive cushions & folded footbath towels across the 2x6 seats
+  for (const seat of FOOTBATH_SEAT_SPOTS) {
+    const cushionMat = new THREE.MeshStandardMaterial({
+      color: footbathSeatColors[seat.id % footbathSeatColors.length],
+      roughness: 0.9,
+    });
+    const cushion = new THREE.Mesh(footbathCushionGeo, cushionMat);
+    cushion.position.set(seat.u, FOOTBATH_DECK_HEIGHT + 0.015, seat.v);
+    cushion.castShadow = false;
+    cushion.receiveShadow = true;
+    cushion.userData.interactType = 'footbath_seat';
+    cushion.userData.footbathIndex = seat.id;
+    footbathHub.add(cushion);
+    interactables.push(cushion);
+
+    const towel = new THREE.Mesh(towelFoldGeo, footTowelMat);
+    towel.position.set(
+      seat.u + 0.44,
+      FOOTBATH_DECK_HEIGHT + 0.015,
+      seat.v + (seat.row === 'nw' ? -0.26 : 0.26),
+    );
+    towel.rotation.y = (seat.id % 3 - 1) * 0.08;
+    towel.receiveShadow = true;
+    footbathHub.add(towel);
+  }
+
+  // 2-tier hot-spring rock waterfall (바위 언덕 + 2단 온천 폭포 + 낙수 파문) at upstream head
+  const waterfallGroup = new THREE.Group();
+  waterfallGroup.position.set(FOOTBATH_WATERWHEEL_POS.x, 0, FOOTBATH_WATERWHEEL_POS.z);
+  waterfallGroup.rotation.y = FOOTBATH_DECK_YAW;
+  footStreamGroup.add(waterfallGroup);
+
+  // Layered volcanic rock cliff & stepped side boulders
+  const wfRockSpecs: ReadonlyArray<{
+    x: number;
+    y: number;
+    z: number;
+    sx: number;
+    sy: number;
+    sz: number;
+    ry: number;
+    snowY?: number;
+  }> = [
+    { x: 1.55, y: 1.05, z: 0.0, sx: 1.45, sy: 2.15, sz: 1.85, ry: 0.25, snowY: 2.02 },
+    { x: 1.38, y: 0.86, z: -1.15, sx: 1.18, sy: 1.72, sz: 1.25, ry: 1.1, snowY: 1.62 },
+    { x: 1.38, y: 0.82, z: 1.15, sx: 1.15, sy: 1.66, sz: 1.28, ry: 2.3, snowY: 1.56 },
+    { x: 0.86, y: 0.92, z: -0.78, sx: 0.96, sy: 1.68, sz: 0.92, ry: 0.65, snowY: 1.66 },
+    { x: 0.86, y: 0.88, z: 0.78, sx: 0.94, sy: 1.62, sz: 0.95, ry: 1.85, snowY: 1.6 },
+    { x: 0.28, y: 0.48, z: -0.92, sx: 0.88, sy: 0.98, sz: 0.82, ry: 2.6, snowY: 0.92 },
+    { x: 0.28, y: 0.45, z: 0.92, sx: 0.85, sy: 0.92, sz: 0.86, ry: 0.9, snowY: 0.88 },
+    { x: -0.28, y: 0.22, z: -0.82, sx: 0.68, sy: 0.48, sz: 0.62, ry: 1.4 },
+    { x: -0.28, y: 0.22, z: 0.82, sx: 0.66, sy: 0.46, sz: 0.64, ry: 0.4 },
+  ];
+
+  for (const spec of wfRockSpecs) {
+    const boulder = new THREE.Mesh(rockGeo, wetStoneMat);
+    boulder.position.set(spec.x, spec.y, spec.z);
+    boulder.scale.set(spec.sx, spec.sy, spec.sz);
+    boulder.rotation.y = spec.ry;
+    boulder.castShadow = true;
+    boulder.receiveShadow = true;
+    waterfallGroup.add(boulder);
+
+    if (spec.snowY !== undefined) {
+      const snowCap = new THREE.Mesh(rockGeo, snowCapMat);
+      snowCap.position.set(spec.x + 0.04, spec.snowY, spec.z);
+      snowCap.scale.set(spec.sx * 0.78, 0.22, spec.sz * 0.78);
+      snowCap.rotation.y = spec.ry + 0.2;
+      snowCap.receiveShadow = true;
+      waterfallGroup.add(snowCap);
+    }
+  }
+
+  // Tier 1 upper spillway rock ledge (y = 1.78m) & Tier 2 middle cascade shelf (y = 0.94m)
+  const upperLedge = new THREE.Mesh(
+    new THREE.BoxGeometry(0.95, 0.28, 1.25),
+    wetStoneMat,
+  );
+  upperLedge.position.set(0.92, 1.66, 0);
+  upperLedge.castShadow = true;
+  upperLedge.receiveShadow = true;
+  waterfallGroup.add(upperLedge);
+
+  const midLedge = new THREE.Mesh(
+    new THREE.BoxGeometry(0.92, 0.88, 1.38),
+    wetStoneMat,
+  );
+  midLedge.position.set(0.36, 0.46, 0);
+  midLedge.castShadow = true;
+  midLedge.receiveShadow = true;
+  waterfallGroup.add(midLedge);
+
+  // Hot-spring water pools on upper & middle rock shelves
+  const shelfPoolMat = new THREE.MeshStandardMaterial({
+    color: '#8ce3ec',
+    emissive: '#3b8d99',
+    emissiveIntensity: 0.24,
+    roughness: 0.14,
+    transparent: true,
+    opacity: 0.86,
+  });
+  const upperShelfPool = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.68, 0.92).rotateX(-Math.PI / 2),
+    shelfPoolMat,
+  );
+  upperShelfPool.position.set(0.84, 1.81, 0);
+  waterfallGroup.add(upperShelfPool);
+
+  const midShelfPool = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.66, 1.08).rotateX(-Math.PI / 2),
+    shelfPoolMat,
+  );
+  midShelfPool.position.set(0.32, 0.91, 0);
+  waterfallGroup.add(midShelfPool);
+
+  // Bamboo spring outlet emerging from top rock crevice
+  const springSpout = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.065, 0.075, 0.75, 8),
+    bambooMat,
+  );
+  springSpout.rotation.z = Math.PI / 2 + 0.18;
+  springSpout.position.set(1.18, 1.94, 0);
+  waterfallGroup.add(springSpout);
+
+  // 2-tier cascading waterfall curtains & animated foam ribbons
+  const waterfallVeilMat = new THREE.MeshStandardMaterial({
+    color: '#dcf7fb',
+    emissive: '#59b4c2',
+    emissiveIntensity: 0.26,
+    transparent: true,
+    opacity: 0.62,
+    roughness: 0.16,
+    side: THREE.DoubleSide,
   });
 
-  const foliageGeo = new THREE.ConeGeometry(2.15, 4.2, 8);
+  // Tier 1 upper cascade curtain (y = 1.81 -> 0.91)
+  const upperFallVeil = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.26, 0.34, 0.96, 10, 1, true, -Math.PI * 0.36, Math.PI * 0.72),
+    waterfallVeilMat,
+  );
+  upperFallVeil.rotation.y = -Math.PI / 2;
+  upperFallVeil.rotation.z = -0.18;
+  upperFallVeil.position.set(0.32, 1.36, 0);
+  waterfallGroup.add(upperFallVeil);
+
+  // Tier 2 lower wide cascade curtain (y = 0.91 -> 0.02)
+  const lowerFallVeil = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.38, 0.48, 0.94, 12, 1, true, -Math.PI * 0.38, Math.PI * 0.76),
+    waterfallVeilMat,
+  );
+  lowerFallVeil.rotation.y = -Math.PI / 2;
+  lowerFallVeil.rotation.z = -0.22;
+  lowerFallVeil.position.set(-0.22, 0.46, 0);
+  waterfallGroup.add(lowerFallVeil);
+
+  // Animated vertical white foam streaks across both tiers
+  const waterfallRibbons: Array<{
+    mesh: THREE.Mesh;
+    mat: THREE.MeshBasicMaterial;
+    baseY: number;
+    phase: number;
+  }> = [];
+  const ribbonSpecs = [
+    { x: 0.47, y: 1.37, z: -0.16, w: 0.11, h: 0.88, tilt: -0.18, phase: 0.0 },
+    { x: 0.48, y: 1.36, z: 0.02, w: 0.14, h: 0.9, tilt: -0.18, phase: 1.8 },
+    { x: 0.47, y: 1.37, z: 0.18, w: 0.1, h: 0.86, tilt: -0.18, phase: 3.4 },
+    { x: -0.02, y: 0.47, z: -0.26, w: 0.13, h: 0.88, tilt: -0.22, phase: 0.7 },
+    { x: 0.0, y: 0.46, z: -0.08, w: 0.16, h: 0.92, tilt: -0.22, phase: 2.3 },
+    { x: 0.0, y: 0.46, z: 0.1, w: 0.15, h: 0.9, tilt: -0.22, phase: 4.1 },
+    { x: -0.02, y: 0.47, z: 0.27, w: 0.12, h: 0.86, tilt: -0.22, phase: 5.2 },
+  ];
+  for (const rSpec of ribbonSpecs) {
+    const rMat = new THREE.MeshBasicMaterial({
+      color: '#f2fdff',
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const rMesh = new THREE.Mesh(new THREE.PlaneGeometry(rSpec.w, rSpec.h), rMat);
+    rMesh.rotation.y = -Math.PI / 2;
+    rMesh.rotation.x = rSpec.tilt;
+    rMesh.position.set(rSpec.x, rSpec.y, rSpec.z);
+    waterfallGroup.add(rMesh);
+    waterfallRibbons.push({ mesh: rMesh, mat: rMat, baseY: rSpec.y, phase: rSpec.phase });
+  }
+
+  // Frothy white plunge cushion & two staggered concentric ripple rings at base
+  const plungeFoamMat = new THREE.MeshBasicMaterial({
+    color: '#ecfcff',
+    transparent: true,
+    opacity: 0.58,
+    depthWrite: false,
+  });
+  const plungeFoam = new THREE.Mesh(
+    new THREE.CircleGeometry(0.46, 18).rotateX(-Math.PI / 2),
+    plungeFoamMat,
+  );
+  plungeFoam.position.set(-0.22, FOOTBATH_WATER_Y + 0.015, 0);
+  waterfallGroup.add(plungeFoam);
+
+  const waterfallRippleRings: Array<{ mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; offset: number }> = [];
+  for (const offset of [0, 0.5]) {
+    const rMat = new THREE.MeshBasicMaterial({
+      color: '#e5f8fc',
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const rMesh = new THREE.Mesh(
+      new THREE.RingGeometry(0.28, 0.46, 22).rotateX(-Math.PI / 2),
+      rMat,
+    );
+    rMesh.position.set(-0.24, FOOTBATH_WATER_Y + 0.012, 0);
+    waterfallGroup.add(rMesh);
+    waterfallRippleRings.push({ mesh: rMesh, mat: rMat, offset });
+  }
+
+  const footSoakRippleMat = new THREE.MeshBasicMaterial({
+    color: '#eefcff',
+    transparent: true,
+    opacity: 0,
+    side: THREE.DoubleSide,
+  });
+  const footSoakRippleRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.14, 0.24, 18),
+    footSoakRippleMat,
+  );
+  footSoakRippleRing.rotation.x = -Math.PI / 2;
+  footSoakRippleRing.visible = false;
+  footStreamGroup.add(footSoakRippleRing);
+
+  // =========================================================================
+  // 8. SNOWY CEDAR FOREST (INSTANCED — MATCHING TERRAIN COLLIDERS)
+  // =========================================================================
+  // Flared root collar + tapered cedar trunk + 3-tier boughs + 2-layer snow + mossy base boulders
+  const flareBaseGeo = new THREE.CylinderGeometry(0.32, 0.58, 0.95, 7);
+  flareBaseGeo.translate(0, 0.45, 0);
+  const trunkGeo = new THREE.CylinderGeometry(0.18, 0.34, 4.4, 8);
+  trunkGeo.translate(0, 2.2, 0);
+  const trunkMat = new THREE.MeshStandardMaterial({
+    color: 0x4b3526,
+    map: textures.hinokiMap,
+    bumpMap: textures.hinokiBump,
+    bumpScale: 0.03,
+    roughness: 0.94,
+  });
+
+  const foliageGeo = new THREE.ConeGeometry(2.25, 3.6, 9);
   const foliageMat = new THREE.MeshStandardMaterial({
-    color: 0x2c4738,
+    color: 0x294637,
     roughness: 0.88,
   });
-  const snowTierGeo = new THREE.ConeGeometry(1.9, 1.35, 8);
+  const snowMidGeo = new THREE.ConeGeometry(2.05, 1.15, 9);
+  const snowTierGeo = new THREE.ConeGeometry(1.65, 1.35, 9);
+  const forestRockGeo = new THREE.DodecahedronGeometry(0.46, 0);
 
-  const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, cedarCoords.length);
-  const tier1Inst = new THREE.InstancedMesh(foliageGeo, foliageMat, cedarCoords.length);
-  const tier2Inst = new THREE.InstancedMesh(foliageGeo, foliageMat, cedarCoords.length);
+  const flareBaseInst = new THREE.InstancedMesh(
+    flareBaseGeo,
+    trunkMat,
+    CEDAR_TREES.length,
+  );
+  const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, CEDAR_TREES.length);
+  const tier1Inst = new THREE.InstancedMesh(foliageGeo, foliageMat, CEDAR_TREES.length);
+  const tier2Inst = new THREE.InstancedMesh(foliageGeo, foliageMat, CEDAR_TREES.length);
+  const tier3Inst = new THREE.InstancedMesh(foliageGeo, foliageMat, CEDAR_TREES.length);
+  const snowMidInst = new THREE.InstancedMesh(
+    snowMidGeo,
+    snowCapMat,
+    CEDAR_TREES.length,
+  );
   const snowTreeInst = new THREE.InstancedMesh(
     snowTierGeo,
     snowCapMat,
-    cedarCoords.length,
+    CEDAR_TREES.length,
   );
+  const forestRockInst = new THREE.InstancedMesh(
+    forestRockGeo,
+    mossStoneMat,
+    CEDAR_TREES.length,
+  );
+
   trunkInst.castShadow = !isSoftwareGl;
   tier1Inst.castShadow = !isSoftwareGl;
   tier2Inst.castShadow = !isSoftwareGl;
+  tier3Inst.castShadow = !isSoftwareGl;
   tier1Inst.receiveShadow = true;
   tier2Inst.receiveShadow = true;
+  tier3Inst.receiveShadow = true;
+  forestRockInst.receiveShadow = true;
 
   const treeTint = new THREE.Color();
-  cedarCoords.forEach((c, idx) => {
+  CEDAR_TREES.forEach((c, idx) => {
     const gy = terrainMeshHeightAt(c.x, c.z);
 
-    dummy.position.set(c.x, gy - 0.1, c.z);
-    dummy.rotation.set(0, rand() * Math.PI * 2, 0);
-    dummy.scale.set(c.s, c.s, c.s);
+    dummy.position.set(c.x, gy - 0.14, c.z);
+    dummy.rotation.set(c.tiltX, c.treeYaw, c.tiltZ);
+    dummy.scale.set(c.scale, c.scale, c.scale);
     dummy.updateMatrix();
+    flareBaseInst.setMatrixAt(idx, dummy.matrix);
     trunkInst.setMatrixAt(idx, dummy.matrix);
 
-    dummy.position.set(c.x, gy + 4.3 * c.s, c.z);
-    dummy.scale.set(c.s, c.s, c.s);
+    dummy.position.set(c.x + c.tiltZ * 0.3, gy + 3.4 * c.scale, c.z - c.tiltX * 0.3);
+    dummy.rotation.set(c.tiltX * 0.8, c.treeYaw + 0.4, c.tiltZ * 0.8);
+    dummy.scale.set(c.scale * 1.06, c.scale * 0.96, c.scale * 1.06);
     dummy.updateMatrix();
     tier1Inst.setMatrixAt(idx, dummy.matrix);
 
-    dummy.position.set(c.x, gy + 6.5 * c.s, c.z);
-    dummy.scale.set(c.s * 0.78, c.s * 0.86, c.s * 0.78);
+    dummy.position.set(c.x + c.tiltZ * 0.6, gy + 5.25 * c.scale, c.z - c.tiltX * 0.6);
+    dummy.rotation.set(c.tiltX * 0.9, c.treeYaw + 1.15, c.tiltZ * 0.9);
+    dummy.scale.set(c.scale * 0.84, c.scale * 0.88, c.scale * 0.84);
     dummy.updateMatrix();
     tier2Inst.setMatrixAt(idx, dummy.matrix);
 
-    dummy.position.set(c.x, gy + 8.0 * c.s, c.z);
-    dummy.scale.set(c.s * 0.68, c.s * 0.75, c.s * 0.68);
+    dummy.position.set(c.x + c.tiltZ * 0.85, gy + 6.95 * c.scale, c.z - c.tiltX * 0.85);
+    dummy.rotation.set(c.tiltX, c.treeYaw + 2.0, c.tiltZ);
+    dummy.scale.set(c.scale * 0.62, c.scale * 0.78, c.scale * 0.62);
+    dummy.updateMatrix();
+    tier3Inst.setMatrixAt(idx, dummy.matrix);
+
+    dummy.position.set(c.x + c.tiltZ * 0.6, gy + 6.1 * c.scale, c.z - c.tiltX * 0.6);
+    dummy.rotation.set(c.tiltX * 0.85, c.treeYaw + 1.15, c.tiltZ * 0.85);
+    dummy.scale.set(c.scale * 0.78, c.scale * 0.8, c.scale * 0.78);
+    dummy.updateMatrix();
+    snowMidInst.setMatrixAt(idx, dummy.matrix);
+
+    dummy.position.set(c.x + c.tiltZ * 0.85, gy + 7.95 * c.scale, c.z - c.tiltX * 0.85);
+    dummy.rotation.set(c.tiltX, c.treeYaw + 2.0, c.tiltZ);
+    dummy.scale.set(c.scale * 0.62, c.scale * 0.72, c.scale * 0.62);
     dummy.updateMatrix();
     snowTreeInst.setMatrixAt(idx, dummy.matrix);
 
-    treeTint.setHSL(0.4 + (rand() - 0.5) * 0.04, 0.24, 0.2 + rand() * 0.06);
+    // Mossy forest boulder nestled beside the tree root collar
+    const ry = terrainMeshHeightAt(c.rockX, c.rockZ);
+    dummy.position.set(c.rockX, ry + c.rockScale * 0.18, c.rockZ);
+    dummy.rotation.set(c.rockRotX, c.rockRotY, c.rockRotZ);
+    dummy.scale.set(c.rockScale * 1.2, c.rockScale * 0.72, c.rockScale);
+    dummy.updateMatrix();
+    forestRockInst.setMatrixAt(idx, dummy.matrix);
+
+    treeTint.setHSL(c.hue, 0.26, c.lightness);
     tier1Inst.setColorAt(idx, treeTint);
+    treeTint.setHSL(c.hue, 0.25, c.lightness + 0.025);
     tier2Inst.setColorAt(idx, treeTint);
+    treeTint.setHSL(c.hue, 0.24, c.lightness + 0.045);
+    tier3Inst.setColorAt(idx, treeTint);
   });
 
+  flareBaseInst.computeBoundingSphere();
   trunkInst.computeBoundingSphere();
   tier1Inst.computeBoundingSphere();
   tier2Inst.computeBoundingSphere();
+  tier3Inst.computeBoundingSphere();
+  snowMidInst.computeBoundingSphere();
   snowTreeInst.computeBoundingSphere();
-  group.add(trunkInst, tier1Inst, tier2Inst, snowTreeInst);
+  forestRockInst.computeBoundingSphere();
+  group.add(
+    flareBaseInst,
+    trunkInst,
+    tier1Inst,
+    tier2Inst,
+    tier3Inst,
+    snowMidInst,
+    snowTreeInst,
+    forestRockInst,
+  );
 
   // =========================================================================
   // 9. RISING STEAM PARTICLES (BATH + YUZU POND + CREEK + FOOT STREAM) & FALLING SNOW
@@ -1793,11 +2394,17 @@ export function createOnsenWorld(
       px = LANDMARKS.yuzuPond.x + Math.cos(a) * r;
       pz = LANDMARKS.yuzuPond.z + Math.sin(a) * r;
     } else if (isFootStream) {
-      px = LANDMARKS.footStream.x + (rand() - 0.5) * 9.5;
-      pz = footStreamCenterZ(px) + (rand() - 0.5) * 1.4;
+      if (i % 2 === 0) {
+        // Warm steam rising directly from the 2-tier hot-spring waterfall & plunge pool
+        px = FOOTBATH_WATERWHEEL_POS.x + (rand() - 0.35) * 2.1;
+        pz = FOOTBATH_WATERWHEEL_POS.z + (rand() - 0.5) * 1.6;
+      } else {
+        px = LANDMARKS.footStream.x + (rand() - 0.5) * 9.5;
+        pz = footStreamCenterZ(px) + (rand() - 0.5) * 1.4;
+      }
     } else {
-      px = (rand() - 0.5) * 18;
-      pz = 38 + (rand() - 0.5) * 3;
+      px = (rand() - 0.5) * 24;
+      pz = LANDMARKS.entranceBridge.z + (rand() - 0.5) * 3;
     }
 
     steamMeta.push({
@@ -1828,14 +2435,20 @@ export function createOnsenWorld(
   steamPoints.frustumCulled = false;
   group.add(steamPoints);
 
+  const bathWarmthLight = new THREE.PointLight('#ffa84c', 0, 22, 1.35);
+  bathWarmthLight.position.set(LANDMARKS.mainBath.x, 2.0, LANDMARKS.mainBath.z);
+  bathWarmthLight.castShadow = false;
+  bathWarmthLight.visible = false;
+  group.add(bathWarmthLight);
+
   // Falling snowflakes
   const snowCount = isSoftwareGl ? 180 : 620;
   const snowPositions = new Float32Array(snowCount * 3);
   const snowSpeeds = new Float32Array(snowCount);
   for (let i = 0; i < snowCount; i++) {
-    snowPositions[i * 3] = (rand() - 0.5) * 86;
+    snowPositions[i * 3] = (rand() - 0.5) * 124;
     snowPositions[i * 3 + 1] = rand() * 24;
-    snowPositions[i * 3 + 2] = WORLD_CENTER_Z + (rand() - 0.5) * 86;
+    snowPositions[i * 3 + 2] = WORLD_CENTER_Z + (rand() - 0.5) * 124;
     snowSpeeds[i] = 1.1 + rand() * 1.1;
   }
   const snowGeo = new THREE.BufferGeometry();
@@ -1944,8 +2557,23 @@ export function createOnsenWorld(
     false,
     0.075,
   );
-  addInteractGuideRing('milk_vending', 17.05, 7.35, 0.78, '#ffd99c', true, 0.095);
-  addInteractGuideRing('shishi_odoshi', -21.1, 30.8, 0.68, '#b5d68b', false);
+  addInteractGuideRing(
+    'milk_vending',
+    LANDMARKS.milkBooth.x + 1.05,
+    LANDMARKS.milkBooth.z - 0.65,
+    0.78,
+    '#ffd99c',
+    true,
+    0.095,
+  );
+  addInteractGuideRing(
+    'shishi_odoshi',
+    LANDMARKS.bambooShishi.x + 2.6,
+    LANDMARKS.bambooShishi.z - 1.2,
+    0.68,
+    '#b5d68b',
+    false,
+  );
   addInteractGuideRing(
     'egg_basket',
     ACTION_SPOTS.eggBasketSpot.x,
@@ -1954,7 +2582,22 @@ export function createOnsenWorld(
     '#ffe099',
     false,
   );
-  addInteractGuideRing('yuzu_pond', -13.6, 9.7, 0.75, '#f4be2b', false);
+  addInteractGuideRing(
+    'yuzu_pond',
+    LANDMARKS.yuzuPond.x + 4.4,
+    LANDMARKS.yuzuPond.z - 0.3,
+    0.75,
+    '#f4be2b',
+    false,
+  );
+  addInteractGuideRing(
+    'footbath_seat',
+    FOOTBATH_SEAT_SPOTS[2].x,
+    FOOTBATH_SEAT_SPOTS[2].z,
+    0.85,
+    '#92e4db',
+    false,
+  );
 
   // Animation update
   const birdTargetVec = new THREE.Vector3();
@@ -2127,21 +2770,61 @@ export function createOnsenWorld(
       }
     }
 
+    const steamSpeedMult =
+      furnaceBoostTimer > 0 ? 1.85 : 1 + Math.min(0.35, stokedLogsCount * 0.06);
+    const steamHeightMult =
+      furnaceBoostTimer > 0 ? 1.32 : 1 + Math.min(0.2, stokedLogsCount * 0.03);
     const sPosAttr = steamGeo.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < steamCount; i++) {
       const m = steamMeta[i];
-      m.phase = (m.phase + safeDt * m.speed) % 1;
-      const y = 0.25 + m.phase * m.maxH;
+      m.phase = (m.phase + safeDt * m.speed * steamSpeedMult) % 1;
+      const y = 0.25 + m.phase * m.maxH * steamHeightMult;
       const driftX = Math.sin(elapsed * 0.7 + i) * m.radius * m.phase;
       const driftZ = Math.cos(elapsed * 0.6 + i * 1.3) * m.radius * m.phase;
       sPosAttr.setXYZ(i, m.originX + driftX, y, m.originZ + driftZ);
     }
     sPosAttr.needsUpdate = true;
 
-    const stokeBoost = Math.min(0.14, stokedLogsCount * 0.025) + (furnaceBoostTimer > 0 ? 0.06 : 0);
+    const stokeBoost =
+      Math.min(0.22, stokedLogsCount * 0.035) +
+      (furnaceBoostTimer > 0 ? 0.16 : 0);
     steamMaterial.color.copy(daySteamColor).lerp(nightSteamColor, nightBlend);
-    steamMaterial.opacity = Math.min(0.72, 0.34 + nightBlend * 0.12 + stokeBoost);
-    steamMaterial.size = 3.15 + stokeBoost * 2.5;
+    steamMaterial.opacity = Math.min(0.82, 0.34 + nightBlend * 0.12 + stokeBoost);
+    steamMaterial.size = 3.15 + stokeBoost * 3.8;
+
+    bathWarmthLight.visible = stokedLogsCount > 0 || furnaceBoostTimer > 0;
+    bathWarmthLight.intensity =
+      stokedLogsCount * 0.35 +
+      (furnaceBoostTimer > 0 ? 1.8 + Math.sin(elapsed * 5.0) * 0.25 : 0);
+
+    // Animate 2-tier hot-spring waterfall ribbons, foam cushion & plunge pool ripples
+    waterfallVeilMat.opacity = 0.56 + Math.sin(elapsed * 4.6) * 0.08;
+    plungeFoamMat.opacity = 0.5 + Math.sin(elapsed * 5.8) * 0.12;
+    plungeFoam.scale.setScalar(0.94 + Math.sin(elapsed * 4.2) * 0.08);
+    for (const rib of waterfallRibbons) {
+      const wave = Math.sin(elapsed * 6.4 + rib.phase);
+      rib.mat.opacity = 0.36 + (wave * 0.5 + 0.5) * 0.34;
+      rib.mesh.scale.x = 0.88 + (wave * 0.5 + 0.5) * 0.28;
+      rib.mesh.position.y = rib.baseY + Math.cos(elapsed * 7.2 + rib.phase) * 0.025;
+    }
+    for (const ring of waterfallRippleRings) {
+      const wfPulse = (elapsed * 0.95 + ring.offset) % 1;
+      ring.mesh.scale.setScalar(0.8 + wfPulse * 1.65);
+      ring.mat.opacity = (1 - wfPulse) * 0.46;
+    }
+
+    const footSoakSpot = cueState?.footSoakSpot;
+    if (footSoakSpot) {
+      const rx = footSoakSpot.x + Math.sin(footSoakSpot.heading) * 0.26;
+      const rz = footSoakSpot.z + Math.cos(footSoakSpot.heading) * 0.26;
+      const soakPulse = (elapsed * 1.35) % 1;
+      footSoakRippleRing.visible = true;
+      footSoakRippleRing.position.set(rx, FOOTBATH_WATER_Y + 0.008, rz);
+      footSoakRippleRing.scale.setScalar(0.75 + soakPulse * 1.25);
+      footSoakRippleMat.opacity = (1 - soakPulse) * 0.55;
+    } else {
+      footSoakRippleRing.visible = false;
+    }
 
     // 6. Gently falling snow
     const snPosAttr = snowGeo.attributes.position as THREE.BufferAttribute;
@@ -2151,7 +2834,7 @@ export function createOnsenWorld(
       const sz = snPosAttr.getZ(i) + Math.cos(elapsed * 0.6 + i) * safeDt * 0.2;
       if (sy < -0.2) {
         sy = 22 + (i % 5);
-        sx = ((i * 37) % 86) - 43;
+        sx = ((i * 37) % 124) - 62;
       }
       snPosAttr.setXYZ(i, sx, sy, sz);
     }

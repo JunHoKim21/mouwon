@@ -4,7 +4,7 @@ import {
 } from '../shared/multiplayerProtocol.ts';
 import type { CatCoatId } from './catCoats.ts';
 import { shortestAngleDelta } from './npcTrainMath.ts';
-import type { CatActionMode } from './ritualMath.ts';
+import type { CatActionMode, MilkDrinkId } from './ritualMath.ts';
 
 export interface RemoteCatSimState {
   id: string;
@@ -21,6 +21,7 @@ export interface RemoteCatSimState {
   moveSpeed: number;
   hasHeadYuzu: boolean;
   carryingFirewood: boolean;
+  heldMilkId: MilkDrinkId | null;
   actionTime: number;
   lastUpdatedAt: number;
 }
@@ -52,6 +53,7 @@ export function createRemoteCatSimState(
     moveSpeed: peer.moveSpeed,
     hasHeadYuzu: peer.hasHeadYuzu,
     carryingFirewood: peer.carryingFirewood,
+    heldMilkId: peer.heldMilkId ?? null,
     actionTime: 0,
     lastUpdatedAt: now,
   };
@@ -86,6 +88,7 @@ export function applyRemotePeerUpdate(
   state.moveSpeed = peer.moveSpeed;
   state.hasHeadYuzu = peer.hasHeadYuzu;
   state.carryingFirewood = peer.carryingFirewood;
+  state.heldMilkId = peer.heldMilkId ?? null;
   state.lastUpdatedAt = now;
 
   return { coatChanged };

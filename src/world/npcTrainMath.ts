@@ -31,7 +31,7 @@ export interface NpcCatRuntimeState {
 
 export const TRAIN_FOLLOW_SPACING = 1.45;
 export const TRAIN_MIN_SEPARATION = 0.95;
-export const TRAIN_MOVE_SPEED = 3.6;
+export const TRAIN_MOVE_SPEED = 2.45;
 export const DEFAULT_MAX_TRAIN_FOLLOWERS = 2;
 
 export interface StepNpcCatsOptions {
@@ -97,9 +97,9 @@ export const NPC_CAT_SPECS: readonly NpcCatSpec[] = [
     id: 'npc-cream',
     name: '크림이',
     coatId: 'creamsicle',
-    homeX: 2.4,
-    homeZ: -11.5,
-    homeHeading: -0.15,
+    homeX: LANDMARKS.myoyeongak.x + 2.4,
+    homeZ: LANDMARKS.myoyeongak.z - 2.4,
+    homeHeading: -0.78,
     homeAction: 'loaf',
     hasTowel: false,
     hasYuzu: false,
@@ -126,6 +126,18 @@ export const NPC_CAT_SPECS: readonly NpcCatSpec[] = [
     homeHeading: -2.45,
     homeAction: 'soak',
     hasTowel: true,
+    hasYuzu: false,
+    joinsTrain: false,
+  },
+  {
+    id: 'npc-milk',
+    name: '우유냥',
+    coatId: 'calico',
+    homeX: LANDMARKS.milkBooth.x - 2.65,
+    homeZ: LANDMARKS.milkBooth.z + 0.85,
+    homeHeading: 0.45,
+    homeAction: 'loaf',
+    hasTowel: false,
     hasYuzu: false,
     joinsTrain: false,
   },
@@ -167,6 +179,8 @@ function getBathCircleTangentWaypoint(
   const rx = closestX - cx;
   const rz = closestZ - cz;
   const dist = Math.hypot(rx, rz);
+  // South/North stair mouths have no rim rocks for |rx| < 2.6, |rz| >= 10.2
+  if (Math.abs(rx) < 2.6 && Math.abs(rz) >= 10.2) return null;
   if (dist >= blockRadius) return null;
   if (dist > 0.25) {
     return {
@@ -186,17 +200,15 @@ function getBathWaypointIfBlocked(
 ): { x: number; z: number } {
   const fromBx = fromX - LANDMARKS.mainBath.x;
   const fromBz = fromZ - LANDMARKS.mainBath.z;
-  const fromDist = Math.hypot(fromBx, fromBz);
 
   const destBx = destX - LANDMARKS.mainBath.x;
   const destBz = destZ - LANDMARKS.mainBath.z;
-  const destDist = Math.hypot(destBx, destBz);
 
   const fromInPool = isInBathPoolBasin(fromX, fromZ);
   const destInPool = isInBathPoolBasin(destX, destZ);
 
-  const fromOnStair = !fromInPool && fromDist < 11.15 && Math.abs(fromBx) <= 1.95;
-  const destOnStair = !destInPool && destDist < 11.15 && Math.abs(destBx) <= 1.95;
+  const fromOnStair = !fromInPool && Math.abs(fromBz) < 10.35 && Math.abs(fromBx) <= 1.95;
+  const destOnStair = !destInPool && Math.abs(destBz) < 10.35 && Math.abs(destBx) <= 1.95;
 
   // Outside-to-outside: steer smoothly around bath & rock-belt perimeter along the radial tangent
   if (!fromInPool && !fromOnStair && !destInPool && !destOnStair) {
@@ -214,7 +226,7 @@ function getBathWaypointIfBlocked(
   if (fromInPool && !destInPool) {
     const useSouth = fromBz >= 0 || destBz >= 0;
     const insideAxisZ = useSouth ? 5.6 : 2.2;
-    const outsideAxisZ = useSouth ? 15.6 : -7.6;
+    const outsideAxisZ = useSouth ? 15.0 : -7.0;
     if (Math.abs(fromBx) > 1.35) {
       return { x: LANDMARKS.mainBath.x, z: insideAxisZ };
     }
@@ -227,14 +239,14 @@ function getBathWaypointIfBlocked(
   // Leaving stair corridor -> courtyard
   if (fromOnStair && !destInPool && !destOnStair) {
     const useSouth = fromBz >= 0;
-    return { x: LANDMARKS.mainBath.x, z: useSouth ? 15.6 : -7.6 };
+    return { x: LANDMARKS.mainBath.x, z: useSouth ? 15.0 : -7.0 };
   }
 
   // Entering courtyard -> stair corridor or bath pool: align to stair mouth first
   if (!fromInPool && (destInPool || destOnStair)) {
     const useSouth = fromBz >= 0;
     const insideAxisZ = useSouth ? 5.6 : 2.2;
-    const outsideAxisZ = useSouth ? 15.6 : -7.6;
+    const outsideAxisZ = useSouth ? 15.0 : -7.0;
     if (!fromOnStair && Math.abs(fromBx) > 1.45) {
       return { x: LANDMARKS.mainBath.x, z: outsideAxisZ };
     }
@@ -244,6 +256,63 @@ function getBathWaypointIfBlocked(
   }
 
   return { x: destX, z: destZ };
+}
+
+/**
+ * Advances an NPC cat one step toward `(dx, dz)` while resolving collisions and
+ * sliding tangentially around small obstacles when blocked head-on.
+ */
+function moveCatWithObstacleSlide(
+  curX: number,
+  curZ: number,
+  dx: number,
+  dz: number,
+  len: number,
+  step: number,
+): { x: number; z: number } {
+  const nx = dx / len;
+  const nz = dz / len;
+  const candX = curX + nx * step;
+  const candZ = curZ + nz * step;
+  const primary = resolvePlayerCollisions(candX, candZ);
+  const forwardProgress = (primary.x - curX) * nx + (primary.z - curZ) * nz;
+  if (forwardProgress >= step * 0.45) {
+    return primary;
+  }
+
+  // Blocked radially by a tree/lantern/post: slide along tangent away from push normal
+  const pushX = primary.x - candX;
+  const pushZ = primary.z - candZ;
+  const t1x = -nz;
+  const t1z = nx;
+  const preferFirst = pushX * t1x + pushZ * t1z >= 0;
+  const prefX = preferFirst ? t1x : nz;
+  const prefZ = preferFirst ? t1z : -nx;
+
+  const tryTangent = (tx: number, tz: number) => {
+    const angled = resolvePlayerCollisions(
+      curX + (tx * 0.85 + nx * 0.52) * step,
+      curZ + (tz * 0.85 + nz * 0.52) * step,
+    );
+    if (Math.hypot(angled.x - curX, angled.z - curZ) >= step * 0.35) {
+      return angled;
+    }
+    return resolvePlayerCollisions(curX + tx * step, curZ + tz * step);
+  };
+
+  const prefRes = tryTangent(prefX, prefZ);
+  const prefDist = Math.hypot(prefRes.x - curX, prefRes.z - curZ);
+  if (prefDist >= step * 0.35) {
+    return prefRes;
+  }
+
+  const altRes = tryTangent(-prefX, -prefZ);
+  const altDist = Math.hypot(altRes.x - curX, altRes.z - curZ);
+  const primaryDist = Math.hypot(primary.x - curX, primary.z - curZ);
+  if (altDist > prefDist && altDist > primaryDist) {
+    return altRes;
+  }
+  return prefDist > primaryDist ? prefRes : primary;
 }
 
 /**
@@ -258,6 +327,7 @@ export function stepNpcCats(
   dt: number,
   heightAt: (x: number, z: number) => number,
   options: StepNpcCatsOptions = {},
+  elapsed?: number,
 ): void {
   const safeDt = Math.min(Math.max(dt, 0.001), 0.08);
   const turnAlpha = 1 - Math.exp(-safeDt * 11);
@@ -269,7 +339,9 @@ export function stepNpcCats(
   let prevLeaderHeading = player.heading;
   let activeFollowers = 0;
 
+  let catIndex = -1;
   for (const cat of cats) {
+    catIndex++;
     const canJoin = trainActive && cat.spec.joinsTrain && activeFollowers < maxFollowers;
 
     // 코인사(Nose greeting) 반응 중인 경우: 플레이어를 바라보며 코인사 모션 수행
@@ -311,10 +383,7 @@ export function stepNpcCats(
         cat.heading += shortestAngleDelta(cat.heading, targetHeading) * turnAlpha;
         const speed = TRAIN_MOVE_SPEED * 1.15;
         const step = Math.min(distToWay, speed * safeDt);
-        const resolved = resolvePlayerCollisions(
-          cat.x + (toWayX / distToWay) * step,
-          cat.z + (toWayZ / distToWay) * step,
-        );
+        const resolved = moveCatWithObstacleSlide(cat.x, cat.z, toWayX, toWayZ, distToWay, step);
         cat.x = resolved.x;
         cat.z = resolved.z;
         cat.moveSpeed = speed;
@@ -325,10 +394,7 @@ export function stepNpcCats(
         cat.heading += shortestAngleDelta(cat.heading, targetHeading) * turnAlpha;
         const speed = Math.min(TRAIN_MOVE_SPEED * 1.25, Math.max(1.0, distToWay * 2.4));
         const step = Math.min(distToWay, speed * safeDt);
-        const resolved = resolvePlayerCollisions(
-          cat.x + (toWayX / distToWay) * step,
-          cat.z + (toWayZ / distToWay) * step,
-        );
+        const resolved = moveCatWithObstacleSlide(cat.x, cat.z, toWayX, toWayZ, distToWay, step);
         cat.x = resolved.x;
         cat.z = resolved.z;
         cat.moveSpeed = speed;
@@ -367,8 +433,9 @@ export function stepNpcCats(
           cat.heading += shortestAngleDelta(cat.heading, targetHeading) * turnAlpha;
           const speed = Math.min(TRAIN_MOVE_SPEED, Math.max(0.9, wDist * 2.2));
           const step = Math.min(wDist, speed * safeDt);
-          cat.x += (wx / wDist) * step;
-          cat.z += (wz / wDist) * step;
+          const resolved = moveCatWithObstacleSlide(cat.x, cat.z, wx, wz, wDist, step);
+          cat.x = resolved.x;
+          cat.z = resolved.z;
           cat.moveSpeed = speed;
           cat.actionMode = 'walk';
         }
@@ -377,7 +444,14 @@ export function stepNpcCats(
         cat.z = cat.spec.homeZ;
         cat.heading += shortestAngleDelta(cat.heading, cat.spec.homeHeading) * turnAlpha;
         cat.moveSpeed = 0;
-        cat.actionMode = cat.spec.homeAction;
+        let homeAction: CatActionMode = cat.spec.homeAction;
+        if (elapsed !== undefined && cat.spec.homeAction === 'soak') {
+          const cycle = (elapsed + catIndex * 3.7) % 14.0;
+          if (cycle >= 10.8 && cycle < 13.8) {
+            homeAction = 'groom';
+          }
+        }
+        cat.actionMode = homeAction;
       }
     }
   }

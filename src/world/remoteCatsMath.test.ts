@@ -44,6 +44,26 @@ test('stepRemoteCatSim smoothly interpolates position and wraps heading shortest
 
   assert.equal(coatChanged, true);
   assert.equal(sim.carryingFirewood, true);
+  assert.equal(sim.heldMilkId, null);
+
+  applyRemotePeerUpdate(
+    sim,
+    {
+      id: 'cat-2',
+      coatId: 'tuxedo',
+      x: 2,
+      y: 0,
+      z: 0,
+      heading: -Math.PI + 0.1,
+      actionMode: 'idle',
+      moveSpeed: 0,
+      hasHeadYuzu: false,
+      carryingFirewood: false,
+      heldMilkId: 'banana',
+    },
+    1150,
+  );
+  assert.equal(sim.heldMilkId, 'banana');
 
   const speed = stepRemoteCatSim(sim, 0.05);
   assert.ok(sim.x > 0.5 && sim.x < 2, `expected smooth X progress, got ${sim.x}`);

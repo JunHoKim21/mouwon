@@ -5,10 +5,11 @@ import {
   NPC_CAT_SPECS,
   NpcCatRuntimeState,
   TRAIN_MIN_SEPARATION,
+  TRAIN_MOVE_SPEED,
   shortestAngleDelta,
   stepNpcCats,
 } from './npcTrainMath.ts';
-import { groundHeightAt } from './terrainMath.ts';
+import { LANDMARKS, groundHeightAt } from './terrainMath.ts';
 
 test('NPC_CAT_SPECS places 6-8 distinct non-overlapping cats in bath and resting spots', () => {
   assert.ok(NPC_CAT_SPECS.length >= 6 && NPC_CAT_SPECS.length <= 8);
@@ -96,8 +97,8 @@ test('Disabling walk train returns NPC cats to their soaking and loafing home sp
     moveSpeed: 2.0,
   }));
 
-  const player = { x: 0, z: 38, heading: Math.PI };
-  for (let step = 0; step < 300; step++) {
+  const player = { x: 0, z: LANDMARKS.entranceBridge.z, heading: Math.PI };
+  for (let step = 0; step < 650; step++) {
     stepNpcCats(cats, player, false, 0.05, groundHeightAt);
   }
 
@@ -206,4 +207,42 @@ test('NPC cat reacts to nose greeting (greetReactionTimer) by facing player and 
   // Returns to home soak state
   assert.equal(mikan.actionMode, 'soak');
 });
+
+test('TRAIN_MOVE_SPEED is slowed to 2.45 and soaking NPCs periodically groom when elapsed is provided', () => {
+  assert.equal(TRAIN_MOVE_SPEED, 2.45);
+
+  const cats: NpcCatRuntimeState[] = NPC_CAT_SPECS.map((spec) => ({
+    spec,
+    x: spec.homeX,
+    y: groundHeightAt(spec.homeX, spec.homeZ),
+    z: spec.homeZ,
+    heading: spec.homeHeading,
+    actionMode: spec.homeAction,
+    moveSpeed: 0,
+  }));
+
+  const player = { x: 0, z: LANDMARKS.entranceBridge.z, heading: Math.PI };
+  // For index 2 (npc-mikan), cycle = (4.1 + 2 * 3.7) % 14 = 11.5 in [10.8, 13.8)
+  stepNpcCats(cats, player, false, 0.05, groundHeightAt, {}, 4.1);
+
+  const mikan = cats.find((c) => c.spec.id === 'npc-mikan')!;
+  const haru = cats.find((c) => c.spec.id === 'npc-haru')!;
+  const cream = cats.find((c) => c.spec.id === 'npc-cream')!;
+
+  assert.equal(mikan.actionMode, 'groom');
+  assert.equal(haru.actionMode, 'soak');
+  assert.equal(cream.actionMode, 'loaf');
+});
+
+test('npc-milk (우유냥) rests well inside the milk booth wooden bench at height 0.34', () => {
+  const milkCat = NPC_CAT_SPECS.find((s) => s.id === 'npc-milk')!;
+  assert.ok(milkCat);
+  // Bench mesh spans local x in [-3.55, -0.25], z in [-0.50, +2.10]
+  assert.ok(milkCat.homeX >= LANDMARKS.milkBooth.x - 3.45);
+  assert.ok(milkCat.homeX <= LANDMARKS.milkBooth.x - 0.35);
+  assert.ok(milkCat.homeZ >= LANDMARKS.milkBooth.z - 0.4);
+  assert.ok(milkCat.homeZ <= LANDMARKS.milkBooth.z + 2.0);
+  assert.equal(groundHeightAt(milkCat.homeX, milkCat.homeZ), 0.34);
+});
+
 

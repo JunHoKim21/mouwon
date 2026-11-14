@@ -7,35 +7,39 @@ import {
   resolvePlayerCollisions,
 } from './terrainMath';
 
-const GRID_MIN_X = -45;
-const GRID_MAX_X = 45;
-const GRID_MIN_Z = -35;
-const GRID_MAX_Z = 55;
+const GRID_MIN_X = -74;
+const GRID_MAX_X = 74;
+const GRID_MIN_Z = -68;
+const GRID_MAX_Z = 75;
 const CELL_SIZE = 0.85;
 const COLS = Math.floor((GRID_MAX_X - GRID_MIN_X) / CELL_SIZE) + 1;
 const ROWS = Math.floor((GRID_MAX_Z - GRID_MIN_Z) / CELL_SIZE) + 1;
 
-const NAV_PLAYER_RADIUS = 0.45;
+const NAV_PLAYER_RADIUS = 0.48;
 
 const SOUTH_BATH_INNER: Vec2 = { x: 0, z: 5.6 };
 const SOUTH_BATH_OUTER: Vec2 = { x: 0, z: 12.2 };
 const NORTH_BATH_INNER: Vec2 = { x: 0, z: 2.2 };
 const NORTH_BATH_OUTER: Vec2 = { x: 0, z: -7.6 };
-const MYOYEONGAK_VERANDA: Vec2 = { x: 0, z: -6.6 };
+const MYOYEONGAK_VERANDA: Vec2 = { x: 0, z: LANDMARKS.myoyeongak.maxZ - 0.2 };
 
 export function isInsideMyoyeongak(x: number, z: number): boolean {
-  return Math.abs(x) <= 5.4 && z >= -16.0 && z <= -6.8;
+  return (
+    Math.abs(x) <= LANDMARKS.myoyeongak.halfW - 0.8 &&
+    z >= LANDMARKS.myoyeongak.minZ + 0.4 &&
+    z <= LANDMARKS.myoyeongak.maxZ - 0.4
+  );
 }
 
 /**
  * Checks whether world (x, z) is blocked for navigation.
- * When allowBathWater is false (default courtyard navigation), the sunken bath basin
- * is treated as non-walkable so courtyard routes walk around the hinoki bath instead of wading through it.
+ * The central hinoki bath basin is traversable via its south and north stair openings,
+ * while its outer timber rim wall and rocks block perimeter crossings.
  */
 export function isNavPointBlocked(
   x: number,
   z: number,
-  allowBathWater = false,
+  _allowBathWater = false,
 ): boolean {
   if (Math.hypot(x, z - WORLD_CENTER_Z) > PLAYABLE_RADIUS - 0.1) {
     return true;
@@ -45,10 +49,6 @@ export function isNavPointBlocked(
   if (
     Math.hypot(x - LANDMARKS.yuzuPond.x, z - LANDMARKS.yuzuPond.z) < 3.65
   ) {
-    return true;
-  }
-
-  if (!allowBathWater && isInsideMainBath(x, z)) {
     return true;
   }
 
@@ -63,7 +63,7 @@ function hasLineOfSight(
 ): boolean {
   const dist = Math.hypot(b.x - a.x, b.z - a.z);
   if (dist < 0.05) return true;
-  const steps = Math.max(2, Math.ceil(dist / 0.22));
+  const steps = Math.max(2, Math.ceil(dist / 0.16));
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
     const px = a.x + (b.x - a.x) * t;
@@ -258,6 +258,12 @@ function runAStarSegment(start: Vec2, goal: Vec2): Vec2[] {
         }
       }
 
+      // Guard against circular rock colliders protruding past an edge midpoint between two unblocked cell centers
+      const mid = cellToWorld(c + dc * 0.5, r + dr * 0.5);
+      if (isNavPointBlocked(mid.x, mid.z, false)) {
+        continue;
+      }
+
       const tentativeG = currG + stepCost;
       if (tentativeG < gScore[nextIdx]) {
         cameFrom[nextIdx] = current;
@@ -321,7 +327,7 @@ function appendUnique(queue: Vec2[], pt: Vec2): void {
  * Enforces central hinoki bath stair entry/exit and Myoyeongak front veranda gates.
  */
 export function findWorldPath(start: Vec2, rawGoal: Vec2): Vec2[] {
-  const resolvedGoal = resolvePlayerCollisions(rawGoal.x, rawGoal.z, 0.42);
+  const resolvedGoal = resolvePlayerCollisions(rawGoal.x, rawGoal.z, 0.5);
   let goal: Vec2 = { x: resolvedGoal.x, z: resolvedGoal.z };
 
   // If clicked inside yuzu pond water, snap goal outside toward start side
@@ -384,24 +390,67 @@ export function findWorldPath(start: Vec2, rawGoal: Vec2): Vec2[] {
     bathEntryPoints.push(outer, inner, goal);
   }
 
-  // 3. Plan courtyard path while respecting Myoyeongak front veranda gate
+  // 3. Plan courtyard path while routing N<->S central corridor trips through the bath & respecting Myoyeongak veranda gate
   const cStartInPav = isInsideMyoyeongak(courtyardStart.x, courtyardStart.z);
   const cGoalInPav = isInsideMyoyeongak(courtyardGoal.x, courtyardGoal.z);
 
-  if (Math.hypot(courtyardGoal.x - courtyardStart.x, courtyardGoal.z - courtyardStart.z) >= 0.1) {
-    if (cStartInPav && !cGoalInPav) {
-      appendUnique(waypoints, MYOYEONGAK_VERANDA);
-      for (const p of runAStarSegment(MYOYEONGAK_VERANDA, courtyardGoal)) {
-        appendUnique(waypoints, p);
-      }
-    } else if (!cStartInPav && cGoalInPav) {
+  if (cStartInPav && cGoalInPav) {
+    for (const p of runAStarSegment(courtyardStart, courtyardGoal)) {
+      appendUnique(waypoints, p);
+    }
+  } else {
+    let activeStart = courtyardStart;
+    if (cStartInPav) {
       for (const p of runAStarSegment(courtyardStart, MYOYEONGAK_VERANDA)) {
         appendUnique(waypoints, p);
       }
       appendUnique(waypoints, MYOYEONGAK_VERANDA);
-      appendUnique(waypoints, courtyardGoal);
-    } else {
-      for (const p of runAStarSegment(courtyardStart, courtyardGoal)) {
+      activeStart = MYOYEONGAK_VERANDA;
+    }
+    const activeGoal = cGoalInPav ? MYOYEONGAK_VERANDA : courtyardGoal;
+
+    const southToNorthThroughBath =
+      activeStart.z >= LANDMARKS.mainBath.z + 8.0 &&
+      activeGoal.z <= LANDMARKS.mainBath.z - 8.0 &&
+      (Math.abs(activeStart.x) <= 14 || Math.abs(activeGoal.x) <= 14);
+    const northToSouthThroughBath =
+      activeStart.z <= LANDMARKS.mainBath.z - 8.0 &&
+      activeGoal.z >= LANDMARKS.mainBath.z + 8.0 &&
+      (Math.abs(activeStart.x) <= 14 || Math.abs(activeGoal.x) <= 14);
+
+    if (southToNorthThroughBath) {
+      if (Math.hypot(SOUTH_BATH_OUTER.x - activeStart.x, SOUTH_BATH_OUTER.z - activeStart.z) >= 0.1) {
+        for (const p of runAStarSegment(activeStart, SOUTH_BATH_OUTER)) {
+          appendUnique(waypoints, p);
+        }
+      }
+      appendUnique(waypoints, SOUTH_BATH_OUTER);
+      appendUnique(waypoints, SOUTH_BATH_INNER);
+      appendUnique(waypoints, NORTH_BATH_INNER);
+      appendUnique(waypoints, NORTH_BATH_OUTER);
+      activeStart = NORTH_BATH_OUTER;
+    } else if (northToSouthThroughBath) {
+      if (Math.hypot(NORTH_BATH_OUTER.x - activeStart.x, NORTH_BATH_OUTER.z - activeStart.z) >= 0.1) {
+        for (const p of runAStarSegment(activeStart, NORTH_BATH_OUTER)) {
+          appendUnique(waypoints, p);
+        }
+      }
+      appendUnique(waypoints, NORTH_BATH_OUTER);
+      appendUnique(waypoints, NORTH_BATH_INNER);
+      appendUnique(waypoints, SOUTH_BATH_INNER);
+      appendUnique(waypoints, SOUTH_BATH_OUTER);
+      activeStart = SOUTH_BATH_OUTER;
+    }
+
+    if (Math.hypot(activeGoal.x - activeStart.x, activeGoal.z - activeStart.z) >= 0.1) {
+      for (const p of runAStarSegment(activeStart, activeGoal)) {
+        appendUnique(waypoints, p);
+      }
+    }
+
+    if (cGoalInPav) {
+      appendUnique(waypoints, MYOYEONGAK_VERANDA);
+      for (const p of runAStarSegment(MYOYEONGAK_VERANDA, courtyardGoal)) {
         appendUnique(waypoints, p);
       }
     }

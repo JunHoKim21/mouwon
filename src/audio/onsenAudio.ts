@@ -1,6 +1,7 @@
 import {
   FootstepSurface,
   PENTATONIC_BAMBOO_NOTES,
+  SpatialNatureMix,
   YARN_MAX_COUNT,
 } from '../world/ritualMath';
 
@@ -78,6 +79,171 @@ function createPinkNoiseBuffer(
   return buffer;
 }
 
+function normalizeBufferRms(
+  data: Float32Array,
+  targetRms: number,
+  activeLength: number,
+  fadeTailSamples = 0,
+): void {
+  const n = Math.max(1, Math.min(data.length, activeLength));
+  let sumSq = 0;
+  for (let i = 0; i < n; i++) {
+    sumSq += data[i] * data[i];
+  }
+  const rms = Math.sqrt(sumSq / n);
+  const scale = targetRms / Math.max(rms, 1e-4);
+  const ceiling = 0.94;
+  for (let i = 0; i < data.length; i++) {
+    const tailFade =
+      fadeTailSamples > 0 && i >= data.length - fadeTailSamples
+        ? (data.length - i) / fadeTailSamples
+        : 1;
+    data[i] = ceiling * Math.tanh((data[i] * scale) / ceiling) * tailFade;
+  }
+}
+
+function createSnowCrunchBuffer(ctx: AudioContext): AudioBuffer {
+  const sampleRate = ctx.sampleRate;
+  const duration = 0.19;
+  const length = Math.max(1024, Math.floor(sampleRate * duration));
+  const buffer = ctx.createBuffer(1, length, sampleRate);
+  const data = buffer.getChannelData(0);
+
+  // Soft wintry snow press ("사각- 뽀득") without harsh gravel crackle
+  let grainEnv = 0.65;
+  let grainCooldown = 0;
+  let bodyLp = 0;
+  let shearLp = 0;
+  let smoothLp = 0;
+  let dcPrevIn = 0;
+  let dcPrevOut = 0;
+
+  for (let i = 0; i < length; i++) {
+    const t = i / sampleRate;
+    const normT = t / duration;
+
+    const attack = Math.min(1, t / 0.025);
+    const weightPeak = Math.exp(-Math.pow((normT - 0.36) / 0.25, 2));
+    const settlePeak = 0.32 * Math.exp(-Math.pow((normT - 0.7) / 0.15, 2));
+    const macroEnv = attack * (0.24 * Math.exp(-t * 15) + weightPeak + settlePeak);
+
+    grainCooldown--;
+    if (grainCooldown <= 0) {
+      grainEnv = 0.58 + Math.random() * 0.42;
+      grainCooldown = Math.floor(sampleRate * (0.002 + Math.random() * 0.0045));
+    } else {
+      grainEnv = 0.52 + (grainEnv - 0.52) * 0.96;
+    }
+
+    const rawWhite = Math.random() * 2 - 1;
+    // Two-stage soft smoothing keeps crystal texture velvety instead of gritty sandpaper
+    shearLp = shearLp * 0.72 + rawWhite * 0.28;
+    smoothLp = smoothLp * 0.45 + shearLp * 0.55;
+    const crunch = smoothLp * grainEnv * macroEnv;
+
+    // Soft powdery snow cushion under paw
+    bodyLp = bodyLp * 0.94 + rawWhite * 0.06;
+    const padEnv = attack * Math.exp(-t * 20);
+    const pad = bodyLp * 1.15 * padEnv;
+
+    const combined = crunch + pad;
+    const hp = 0.985 * (dcPrevOut + combined - dcPrevIn);
+    dcPrevIn = combined;
+    dcPrevOut = hp;
+    data[i] = hp;
+  }
+
+  normalizeBufferRms(
+    data,
+    0.13,
+    Math.floor(sampleRate * 0.14),
+    Math.floor(sampleRate * 0.03),
+  );
+  return buffer;
+}
+
+function createWaterWadeBuffer(ctx: AudioContext): AudioBuffer {
+  const sampleRate = ctx.sampleRate;
+  const duration = 0.38;
+  const length = Math.max(1024, Math.floor(sampleRate * duration));
+  const buffer = ctx.createBuffer(1, length, sampleRate);
+  const data = buffer.getChannelData(0);
+
+  // Fine trailing water droplet scatter ("차라락") after each splash stride (pure noise bursts)
+  const splashFlicks: Array<{ start: number; dur: number; amp: number }> = [];
+  for (let i = 0; i < 22; i++) {
+    splashFlicks.push({
+      start: 0.035 + Math.random() * 0.28,
+      dur: 0.0016 + Math.random() * 0.0028,
+      amp: 0.35 + Math.random() * 0.55,
+    });
+  }
+
+  let warmMidLp = 0;
+  let warmHpIn = 0;
+  let warmHpOut = 0;
+  let sprayLp = 0;
+  let sprayHpIn = 0;
+  let sprayHpOut = 0;
+  let flutterTarget = 0.85;
+  let flutter = 0.85;
+  let flutterTick = 0;
+
+  for (let i = 0; i < length; i++) {
+    const t = i / sampleRate;
+
+    // Clean "촤~아~" splash envelope: quick swell (22ms) -> sustained airy fan -> soft tail
+    const attack = Math.min(1, t / 0.022);
+    const tail = Math.exp(-Math.max(0, t - 0.028) * 10.2);
+    const secondaryWash = 0.24 * Math.exp(-Math.pow((t - 0.115) / 0.048, 2));
+    const splashEnv = attack * (tail + secondaryWash);
+
+    // Gentle liquid droplet modulation (breaks flat hiss into sparkling splash without low thumps)
+    flutterTick--;
+    if (flutterTick <= 0) {
+      flutterTarget = 0.65 + Math.random() * 0.35;
+      flutterTick = Math.floor(sampleRate * (0.004 + Math.random() * 0.007));
+    }
+    flutter += (flutterTarget - flutter) * 0.06;
+
+    const w1 = Math.random() * 2 - 1;
+    const w2 = Math.random() * 2 - 1;
+
+    // 1. Warm mid water-splash core (~380-1400Hz, zero sub-300Hz "투퉁" thud)
+    warmMidLp = warmMidLp * 0.8 + w1 * 0.2;
+    const warmMid = 0.94 * (warmHpOut + warmMidLp - warmHpIn);
+    warmHpIn = warmMidLp;
+    warmHpOut = warmMid;
+
+    // 2. Soft "촤~" water-parting fan (~800-2400Hz, rolled off smoothly so it's never sharp)
+    sprayLp = sprayLp * 0.68 + w2 * 0.32;
+    const sprayBand = 0.88 * (sprayHpOut + sprayLp - sprayHpIn);
+    sprayHpIn = sprayLp;
+    sprayHpOut = sprayBand;
+
+    // 3. Gentle surface spray droplets
+    let flickEnv = 0;
+    for (const f of splashFlicks) {
+      const dt = t - f.start;
+      if (dt >= 0 && dt < f.dur) {
+        flickEnv += f.amp * (1 - dt / f.dur);
+      }
+    }
+
+    data[i] =
+      (warmMid * 0.85 + sprayBand * 0.58 * flutter) * splashEnv +
+      sprayBand * 0.14 * flickEnv;
+  }
+
+  normalizeBufferRms(
+    data,
+    0.14,
+    Math.floor(sampleRate * 0.22),
+    Math.floor(sampleRate * 0.055),
+  );
+  return buffer;
+}
+
 function makeReverbImpulse(ctx: AudioContext, duration = 1.7): AudioBuffer {
   const rate = ctx.sampleRate;
   const length = Math.floor(rate * duration);
@@ -107,12 +273,18 @@ export class OnsenAudioEngine {
   private reverbInput: GainNode | null = null;
 
   private ambientBus: GainNode | null = null;
+  private windSpatialGain: GainNode | null = null;
   private waterSpatialGain: GainNode | null = null;
+  private cedarSpatialGain: GainNode | null = null;
+  private bambooSpatialGain: GainNode | null = null;
+  private waterwheelSpatialGain: GainNode | null = null;
   private purrBus: GainNode | null = null;
   private purrSpatialGain: GainNode | null = null;
   private sfxBus: GainNode | null = null;
 
   private pinkNoiseShort: AudioBuffer | null = null;
+  private snowCrunchBuffers: AudioBuffer[] = [];
+  private waterWadeBuffers: AudioBuffer[] = [];
   private settings: AudioMixerSettings = { ...DEFAULT_MIXER_SETTINGS };
   private isIndoor = false;
   private initialized = false;
@@ -199,8 +371,23 @@ export class OnsenAudioEngine {
     this.sfxBus = sfxBus;
 
     this.pinkNoiseShort = createPinkNoiseBuffer(ctx, 1.2, 512);
+    this.snowCrunchBuffers = [
+      createSnowCrunchBuffer(ctx),
+      createSnowCrunchBuffer(ctx),
+      createSnowCrunchBuffer(ctx),
+      createSnowCrunchBuffer(ctx),
+    ];
+    this.waterWadeBuffers = [
+      createWaterWadeBuffer(ctx),
+      createWaterWadeBuffer(ctx),
+      createWaterWadeBuffer(ctx),
+      createWaterWadeBuffer(ctx),
+    ];
 
     this.createWinterWind(ctx, ambientBus);
+    this.createCedarFoliage(ctx, ambientBus);
+    this.createBambooRustle(ctx, ambientBus);
+    this.createWaterwheelSound(ctx, ambientBus);
     this.createOnsenWater(ctx, ambientBus);
     this.createPurrSound(ctx, purrBus);
   }
@@ -219,39 +406,222 @@ export class OnsenAudioEngine {
     // Cascaded 24dB/oct lowpass removes harsh hiss/crackling from pink noise
     const lpf1 = ctx.createBiquadFilter();
     lpf1.type = 'lowpass';
-    lpf1.frequency.value = 500;
+    lpf1.frequency.value = 580;
     lpf1.Q.value = 0.55;
 
     const lpf2 = ctx.createBiquadFilter();
     lpf2.type = 'lowpass';
-    lpf2.frequency.value = 460;
-    lpf2.Q.value = 0.55;
+    lpf2.frequency.value = 520;
+    lpf2.Q.value = 0.6;
 
     const windGain = ctx.createGain();
-    windGain.gain.value = 0.065;
+    windGain.gain.value = 0.115;
 
+    const windSpatialGain = ctx.createGain();
+    windSpatialGain.gain.value = 1.0;
+    this.windSpatialGain = windSpatialGain;
+
+    // Primary slow breathing swell
     const lfo = ctx.createOscillator();
     lfo.type = 'sine';
-    lfo.frequency.value = 0.045;
+    lfo.frequency.value = 0.048;
 
     const lfoGainDepth = ctx.createGain();
-    lfoGainDepth.gain.value = 0.025;
+    lfoGainDepth.gain.value = 0.036;
     lfo.connect(lfoGainDepth);
     lfoGainDepth.connect(windGain.gain);
 
     const lfoFreqDepth = ctx.createGain();
-    lfoFreqDepth.gain.value = 120;
+    lfoFreqDepth.gain.value = 165;
     lfo.connect(lfoFreqDepth);
     lfoFreqDepth.connect(lpf2.frequency);
+
+    // Secondary gentle valley gust
+    const gustLfo = ctx.createOscillator();
+    gustLfo.type = 'sine';
+    gustLfo.frequency.value = 0.11;
+
+    const gustGainDepth = ctx.createGain();
+    gustGainDepth.gain.value = 0.018;
+    gustLfo.connect(gustGainDepth);
+    gustGainDepth.connect(windGain.gain);
 
     src.connect(hpf);
     hpf.connect(lpf1);
     lpf1.connect(lpf2);
     lpf2.connect(windGain);
-    windGain.connect(destination);
+    windGain.connect(windSpatialGain);
+    windSpatialGain.connect(destination);
 
     src.start();
     lfo.start();
+    gustLfo.start();
+  }
+
+  /**
+   * Warm mid-band pine needle wind near cedar forest trees (700-1500Hz).
+   */
+  private createCedarFoliage(ctx: AudioContext, destination: AudioNode): void {
+    const buf = createPinkNoiseBuffer(ctx, 7.2, 4096);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1050;
+    bp.Q.value = 1.05;
+
+    const spatialGain = ctx.createGain();
+    spatialGain.gain.value = 0;
+    this.cedarSpatialGain = spatialGain;
+
+    const busScale = ctx.createGain();
+    busScale.gain.value = 0.21;
+
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.17;
+    const lfoDepth = ctx.createGain();
+    lfoDepth.gain.value = 240;
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(bp.frequency);
+
+    const ampLfo = ctx.createOscillator();
+    ampLfo.type = 'sine';
+    ampLfo.frequency.value = 0.12;
+    const ampDepth = ctx.createGain();
+    ampDepth.gain.value = 0.065;
+    ampLfo.connect(ampDepth);
+    ampDepth.connect(busScale.gain);
+
+    src.connect(bp);
+    bp.connect(busScale);
+    busScale.connect(spatialGain);
+    spatialGain.connect(destination);
+
+    src.start();
+    lfo.start();
+    ampLfo.start();
+  }
+
+  /**
+   * Light crispy bamboo leaf rustle in the southwestern bamboo grove (2000-4000Hz + 1000Hz cane shimmer).
+   */
+  private createBambooRustle(ctx: AudioContext, destination: AudioNode): void {
+    const buf = createPinkNoiseBuffer(ctx, 6.4, 4096);
+    const spatialGain = ctx.createGain();
+    spatialGain.gain.value = 0;
+    this.bambooSpatialGain = spatialGain;
+    spatialGain.connect(destination);
+
+    // Layer 1: Distinct crisp bamboo leaf rustle (2000-4000Hz)
+    const leafSrc = ctx.createBufferSource();
+    leafSrc.buffer = buf;
+    leafSrc.loop = true;
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 2750;
+    bp.Q.value = 1.2;
+
+    const busScale = ctx.createGain();
+    busScale.gain.value = 0.28;
+
+    const swayLfo = ctx.createOscillator();
+    swayLfo.type = 'sine';
+    swayLfo.frequency.value = 0.26;
+    const swayDepth = ctx.createGain();
+    swayDepth.gain.value = 0.095;
+    swayLfo.connect(swayDepth);
+    swayDepth.connect(busScale.gain);
+
+    const toneLfo = ctx.createOscillator();
+    toneLfo.type = 'sine';
+    toneLfo.frequency.value = 0.34;
+    const toneDepth = ctx.createGain();
+    toneDepth.gain.value = 540;
+    toneLfo.connect(toneDepth);
+    toneDepth.connect(bp.frequency);
+
+    leafSrc.connect(bp);
+    bp.connect(busScale);
+    busScale.connect(spatialGain);
+
+    // Layer 2: Soft hollow cane breeze undertone (~1050Hz)
+    const caneSrc = ctx.createBufferSource();
+    caneSrc.buffer = buf;
+    caneSrc.loop = true;
+    const caneBp = ctx.createBiquadFilter();
+    caneBp.type = 'bandpass';
+    caneBp.frequency.value = 1050;
+    caneBp.Q.value = 1.15;
+    const caneGain = ctx.createGain();
+    caneGain.gain.value = 0.12;
+    caneSrc.connect(caneBp);
+    caneBp.connect(caneGain);
+    caneGain.connect(spatialGain);
+
+    leafSrc.start();
+    caneSrc.start(0, 1.9);
+    swayLfo.start();
+    toneLfo.start();
+  }
+
+  /**
+   * Warm, soothing 2-tier hot-spring waterfall sound (polyrhythmic cascade bands
+   * rolled off smoothly at 1950Hz with slow organic flow breathing).
+   */
+  private createWaterwheelSound(ctx: AudioContext, destination: AudioNode): void {
+    const buf = createPinkNoiseBuffer(ctx, 6.2, 2048);
+    const spatialGain = ctx.createGain();
+    spatialGain.gain.value = 0;
+    this.waterwheelSpatialGain = spatialGain;
+
+    // Gentle lowpass keeps the waterfall warm and soothing without sharp high hiss
+    const warmthLpf = ctx.createBiquadFilter();
+    warmthLpf.type = 'lowpass';
+    warmthLpf.frequency.value = 1950;
+    warmthLpf.Q.value = 0.55;
+    warmthLpf.connect(spatialGain);
+    spatialGain.connect(destination);
+
+    const bands: Array<{ freq: number; q: number; rate: number; gain: number; offset: number }> = [
+      { freq: 310, q: 0.65, rate: 0.82, gain: 1.25, offset: 0 },
+      { freq: 740, q: 0.6, rate: 1.09, gain: 0.85, offset: 1.7 },
+      { freq: 1380, q: 0.7, rate: 1.38, gain: 0.34, offset: 3.4 },
+    ];
+
+    const flowLfo = ctx.createOscillator();
+    flowLfo.type = 'sine';
+    flowLfo.frequency.value = 0.14;
+
+    for (const band of bands) {
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      src.playbackRate.value = band.rate;
+
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = band.freq;
+      bp.Q.value = band.q;
+
+      const g = ctx.createGain();
+      g.gain.value = band.gain;
+
+      const freqDepth = ctx.createGain();
+      freqDepth.gain.value = band.freq * 0.08;
+      flowLfo.connect(freqDepth);
+      freqDepth.connect(bp.frequency);
+
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(warmthLpf);
+      src.start(0, band.offset);
+    }
+
+    flowLfo.start();
   }
 
   /**
@@ -389,11 +759,29 @@ export class OnsenAudioEngine {
     );
   }
 
-  public updateSpatialVolumes(waterGain: number, purrProximity: number): void {
+  public updateSpatialVolumes(
+    waterGain: number,
+    purrProximity: number,
+    natureMix?: SpatialNatureMix,
+  ): void {
     if (!this.ctx || this.ctx.state !== 'running') return;
     const now = this.ctx.currentTime;
     this.waterSpatialGain?.gain.setTargetAtTime(waterGain, now, 0.12);
     this.purrSpatialGain?.gain.setTargetAtTime(0.05 + purrProximity * 0.55, now, 0.18);
+    if (natureMix) {
+      this.cedarSpatialGain?.gain.setTargetAtTime(natureMix.cedarGain, now, 0.2);
+      this.bambooSpatialGain?.gain.setTargetAtTime(natureMix.bambooGain, now, 0.2);
+      this.waterwheelSpatialGain?.gain.setTargetAtTime(natureMix.waterwheelGain, now, 0.16);
+      // Duck base open-field wind near bamboo grove, waterwheel, or cedar forest so local sounds shine
+      const windDuck = Math.max(
+        0.34,
+        1 -
+          natureMix.bambooGain * 0.62 -
+          natureMix.waterwheelGain * 0.54 -
+          natureMix.cedarGain * 0.34,
+      );
+      this.windSpatialGain?.gain.setTargetAtTime(windDuck, now, 0.22);
+    }
   }
 
   public playMeow(pitchMultiplier = 1.0): void {
@@ -526,51 +914,112 @@ export class OnsenAudioEngine {
     const ctx = this.ctx;
     const now = ctx.currentTime;
 
-    if (surface === 'snow' && this.pinkNoiseShort) {
+    if (surface === 'snow' && this.snowCrunchBuffers.length > 0) {
+      // Soft velvety winter snow press ("사각- 뽀득") matched to stone footstep loudness
+      const buf =
+        this.snowCrunchBuffers[Math.floor(Math.random() * this.snowCrunchBuffers.length)];
       const src = ctx.createBufferSource();
-      src.buffer = this.pinkNoiseShort;
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = 2100 + Math.random() * 450;
-      bp.Q.value = 1.6;
+      src.buffer = buf;
+      src.playbackRate.value = 0.92 + Math.random() * 0.16;
+
+      const warmthLpf = ctx.createBiquadFilter();
+      warmthLpf.type = 'lowpass';
+      warmthLpf.frequency.value = 2650 + Math.random() * 450;
+      warmthLpf.Q.value = 0.65;
+
       const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.linearRampToValueAtTime(0.11, now + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.001, now + 0.075);
-      src.connect(bp);
-      bp.connect(g);
+      g.gain.setValueAtTime(0.16 + Math.random() * 0.03, now);
+
+      src.connect(warmthLpf);
+      warmthLpf.connect(g);
       g.connect(this.sfxBus);
-      src.start(now, Math.random() * 0.4);
-      src.stop(now + 0.085);
+      src.start(now);
+      src.stop(now + 0.22);
     } else if (surface === 'wood') {
+      // Hollow cedar/hinoki board tap + subtle wood grain knock
       const osc = ctx.createOscillator();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(175 + Math.random() * 25, now);
-      osc.frequency.exponentialRampToValueAtTime(92, now + 0.055);
+      osc.frequency.setValueAtTime(188 + Math.random() * 28, now);
+      osc.frequency.exponentialRampToValueAtTime(92, now + 0.06);
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, now);
-      g.gain.linearRampToValueAtTime(0.13, now + 0.006);
-      g.gain.exponentialRampToValueAtTime(0.001, now + 0.065);
+      g.gain.linearRampToValueAtTime(0.14, now + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.068);
       osc.connect(g);
       g.connect(this.sfxBus);
       osc.start(now);
-      osc.stop(now + 0.07);
-    } else if (surface === 'water' && this.pinkNoiseShort) {
+      osc.stop(now + 0.072);
+
+      const body = ctx.createOscillator();
+      body.type = 'triangle';
+      body.frequency.setValueAtTime(390 + Math.random() * 50, now);
+      body.frequency.exponentialRampToValueAtTime(210, now + 0.032);
+      const bg = ctx.createGain();
+      bg.gain.setValueAtTime(0.0001, now);
+      bg.gain.linearRampToValueAtTime(0.055, now + 0.003);
+      bg.gain.exponentialRampToValueAtTime(0.001, now + 0.038);
+      body.connect(bg);
+      bg.connect(this.sfxBus);
+      body.start(now);
+      body.stop(now + 0.042);
+    } else if (surface === 'stone') {
+      // Crisp mineral tap + fine grit scatter on stone flagstone / stepping stones
+      const tap = ctx.createOscillator();
+      tap.type = 'triangle';
+      tap.frequency.setValueAtTime(620 + Math.random() * 140, now);
+      tap.frequency.exponentialRampToValueAtTime(260, now + 0.038);
+      const tg = ctx.createGain();
+      tg.gain.setValueAtTime(0.0001, now);
+      tg.gain.linearRampToValueAtTime(0.11, now + 0.003);
+      tg.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+      tap.connect(tg);
+      tg.connect(this.sfxBus);
+      tap.start(now);
+      tap.stop(now + 0.05);
+
+      if (this.pinkNoiseShort) {
+        const grit = ctx.createBufferSource();
+        grit.buffer = this.pinkNoiseShort;
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 2500 + Math.random() * 500;
+        bp.Q.value = 2.0;
+        const gg = ctx.createGain();
+        gg.gain.setValueAtTime(0.0001, now);
+        gg.gain.linearRampToValueAtTime(0.06, now + 0.004);
+        gg.gain.exponentialRampToValueAtTime(0.001, now + 0.042);
+        grit.connect(bp);
+        bp.connect(gg);
+        gg.connect(this.sfxBus);
+        grit.start(now, Math.random() * 0.5);
+        grit.stop(now + 0.048);
+      }
+    } else if (surface === 'water' && this.waterWadeBuffers.length > 0) {
+      // Soft rounded water-parting splash ("촤~ 촤~") without sharp high hiss or low thuds
+      const buf =
+        this.waterWadeBuffers[Math.floor(Math.random() * this.waterWadeBuffers.length)];
       const src = ctx.createBufferSource();
-      src.buffer = this.pinkNoiseShort;
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = 1100 + Math.random() * 350;
-      bp.Q.value = 1.2;
+      src.buffer = buf;
+      src.playbackRate.value = 0.92 + Math.random() * 0.14;
+
+      const waterHpf = ctx.createBiquadFilter();
+      waterHpf.type = 'highpass';
+      waterHpf.frequency.value = 340;
+
+      const waterLpf = ctx.createBiquadFilter();
+      waterLpf.type = 'lowpass';
+      waterLpf.frequency.value = 2150 + Math.random() * 400;
+      waterLpf.Q.value = 0.5;
+
       const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.linearRampToValueAtTime(0.14, now + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
-      src.connect(bp);
-      bp.connect(g);
+      g.gain.setValueAtTime(0.15 + Math.random() * 0.025, now);
+
+      src.connect(waterHpf);
+      waterHpf.connect(waterLpf);
+      waterLpf.connect(g);
       g.connect(this.sfxBus);
-      src.start(now, Math.random() * 0.5);
-      src.stop(now + 0.15);
+      src.start(now);
+      src.stop(now + 0.42);
     }
   }
 
@@ -850,6 +1299,49 @@ export class OnsenAudioEngine {
       osc.start(t);
       osc.stop(t + 0.58);
     });
+  }
+
+  public playGroomSound(): void {
+    this.unlock();
+    if (!this.ctx || !this.sfxBus || this.settings.muted) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    // Two gentle paw-brushing swishes (filtered soft noise)
+    [0.08, 0.72].forEach((offset) => {
+      if (!this.pinkNoiseShort) return;
+      const t = now + offset;
+      const src = ctx.createBufferSource();
+      src.buffer = this.pinkNoiseShort;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(1450, t);
+      bp.frequency.exponentialRampToValueAtTime(920, t + 0.24);
+      bp.Q.value = 1.6;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.085, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(this.sfxBus!);
+      src.start(t);
+      src.stop(t + 0.31);
+    });
+
+    // Warm soft purr hum underneath grooming
+    const hum = ctx.createOscillator();
+    hum.type = 'triangle';
+    hum.frequency.setValueAtTime(148, now + 0.12);
+    hum.frequency.exponentialRampToValueAtTime(176, now + 0.55);
+    const humGain = ctx.createGain();
+    humGain.gain.setValueAtTime(0.0001, now + 0.12);
+    humGain.gain.linearRampToValueAtTime(0.045, now + 0.25);
+    humGain.gain.exponentialRampToValueAtTime(0.001, now + 0.95);
+    hum.connect(humGain);
+    humGain.connect(this.sfxBus);
+    hum.start(now + 0.12);
+    hum.stop(now + 0.98);
   }
 
   public dispose(): void {
