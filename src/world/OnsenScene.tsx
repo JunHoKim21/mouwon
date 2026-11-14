@@ -1544,19 +1544,30 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           audio.unlock();
           pressedKeys.clear();
           userCameraOverrideTimer = 0;
-          const dist = Math.hypot(spot.x - playerPos.x, spot.z - playerPos.z);
+
+          let targetX = spot.x;
+          let targetZ = spot.z;
+          let targetHeading = spot.heading;
+          if (zoneId === 'foot_stream') {
+            const seat = pickEmptySeatSpot(FOOTBATH_SEAT_SPOTS, 2, findNearestEmptyFootbathSeat);
+            targetX = seat.x;
+            targetZ = seat.z;
+            targetHeading = seat.heading;
+          }
+
+          const dist = Math.hypot(targetX - playerPos.x, targetZ - playerPos.z);
           if (dist <= 0.35) {
             clearWalkJourney();
             executeArrival(
               spot.mode === 'idle' && carryingFirewood ? null : spot.mode,
-              spot.heading,
+              targetHeading,
             );
             forceTickRef.current?.();
             return;
           }
-          startWalkPath(spot.x, spot.z, {
+          startWalkPath(targetX, targetZ, {
             arrivalAction: spot.mode,
-            headingOnArrival: spot.heading,
+            headingOnArrival: targetHeading,
             speedMode: 'journey',
             label: spot.label,
           });

@@ -9,10 +9,15 @@ import {
   shortestAngleDelta,
   stepNpcCats,
 } from './npcTrainMath.ts';
-import { LANDMARKS, groundHeightAt } from './terrainMath.ts';
+import {
+  FOOTBATH_DECK_HEIGHT,
+  FOOTBATH_SEAT_SPOTS,
+  LANDMARKS,
+  groundHeightAt,
+} from './terrainMath.ts';
 
-test('NPC_CAT_SPECS places 6-8 distinct non-overlapping cats in bath and resting spots', () => {
-  assert.ok(NPC_CAT_SPECS.length >= 6 && NPC_CAT_SPECS.length <= 8);
+test('NPC_CAT_SPECS places 6-9 distinct non-overlapping cats in bath and resting spots', () => {
+  assert.ok(NPC_CAT_SPECS.length >= 6 && NPC_CAT_SPECS.length <= 9);
 
   const soakingWithProp = NPC_CAT_SPECS.filter(
     (s) => s.homeAction === 'soak' && (s.hasTowel || s.hasYuzu),
@@ -243,6 +248,13 @@ test('npc-milk (우유냥) rests well inside the milk booth wooden bench at heig
   assert.ok(milkCat.homeZ >= LANDMARKS.milkBooth.z - 0.4);
   assert.ok(milkCat.homeZ <= LANDMARKS.milkBooth.z + 2.0);
   assert.equal(groundHeightAt(milkCat.homeX, milkCat.homeZ), 0.34);
+
+  const footbathCat = NPC_CAT_SPECS.find((s) => s.id === 'npc-footbath')!;
+  assert.ok(footbathCat);
+  assert.equal(footbathCat.homeAction, 'footSoak');
+  assert.equal(footbathCat.homeX, FOOTBATH_SEAT_SPOTS[4].x);
+  assert.equal(footbathCat.homeZ, FOOTBATH_SEAT_SPOTS[4].z);
+  assert.equal(groundHeightAt(footbathCat.homeX, footbathCat.homeZ), FOOTBATH_DECK_HEIGHT);
 });
 
 

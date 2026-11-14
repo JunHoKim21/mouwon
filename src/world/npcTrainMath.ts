@@ -1,6 +1,12 @@
 import { CatCoatId } from './catCoats';
 import { CatActionMode } from './ritualMath';
-import { LANDMARKS, isInsideMainBath, resolvePlayerCollisions } from './terrainMath';
+import {
+  FOOTBATH_SEAT_SPOTS,
+  LANDMARKS,
+  isInsideMainBath,
+  isOnFootbathDeck,
+  resolvePlayerCollisions,
+} from './terrainMath';
 
 export interface NpcCatSpec {
   id: string;
@@ -9,7 +15,7 @@ export interface NpcCatSpec {
   homeX: number;
   homeZ: number;
   homeHeading: number;
-  homeAction: Extract<CatActionMode, 'soak' | 'loaf'>;
+  homeAction: Extract<CatActionMode, 'soak' | 'loaf' | 'footSoak'>;
   hasTowel: boolean;
   hasYuzu: boolean;
   joinsTrain: boolean;
@@ -141,6 +147,18 @@ export const NPC_CAT_SPECS: readonly NpcCatSpec[] = [
     hasYuzu: false,
     joinsTrain: false,
   },
+  {
+    id: 'npc-footbath',
+    name: '솔방울',
+    coatId: 'mackerel',
+    homeX: FOOTBATH_SEAT_SPOTS[4].x,
+    homeZ: FOOTBATH_SEAT_SPOTS[4].z,
+    homeHeading: FOOTBATH_SEAT_SPOTS[4].heading,
+    homeAction: 'footSoak',
+    hasTowel: true,
+    hasYuzu: false,
+    joinsTrain: false,
+  },
 ] as const;
 
 export function shortestAngleDelta(from: number, to: number): number {
@@ -212,6 +230,9 @@ function getBathWaypointIfBlocked(
 
   // Outside-to-outside: steer smoothly around bath & rock-belt perimeter along the radial tangent
   if (!fromInPool && !fromOnStair && !destInPool && !destOnStair) {
+    if (isOnFootbathDeck(destX, destZ) && fromX < 25.0) {
+      return { x: 25.8, z: 26.6 };
+    }
     const tangent = getBathCircleTangentWaypoint(fromX, fromZ, destX, destZ, 10.85, 11.9);
     if (tangent) {
       return tangent;

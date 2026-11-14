@@ -421,7 +421,7 @@ export interface TeleportSpot {
   x: number;
   z: number;
   heading: number;
-  mode: 'idle' | 'soak' | 'loaf' | 'sitBench';
+  mode: 'idle' | 'soak' | 'loaf' | 'sitBench' | 'footSoak';
 }
 
 export const TELEPORT_SPOTS: readonly TeleportSpot[] = [
@@ -484,10 +484,10 @@ export const TELEPORT_SPOTS: readonly TeleportSpot[] = [
   {
     zoneId: 'foot_stream',
     label: '족욕 개울',
-    x: LANDMARKS.footStream.x - 1.6,
-    z: LANDMARKS.footStream.z - 1.5,
-    heading: 0.65,
-    mode: 'idle',
+    x: FOOTBATH_SEAT_SPOTS[2].x,
+    z: FOOTBATH_SEAT_SPOTS[2].z,
+    heading: FOOTBATH_SEAT_SPOTS[2].heading,
+    mode: 'footSoak',
   },
 ] as const;
 

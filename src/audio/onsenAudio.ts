@@ -1,8 +1,6 @@
 import {
   FootstepSurface,
-  PENTATONIC_BAMBOO_NOTES,
   SpatialNatureMix,
-  YARN_MAX_COUNT,
 } from '../world/ritualMath';
 
 export interface AudioMixerSettings {
@@ -816,48 +814,6 @@ export class OnsenAudioEngine {
     osc.stop(now + 0.35);
   }
 
-  public playBambooNote(noteIndex: number): void {
-    this.unlock();
-    if (!this.ctx || !this.sfxBus || this.settings.muted) return;
-    const ctx = this.ctx;
-    const now = ctx.currentTime;
-    const note =
-      PENTATONIC_BAMBOO_NOTES[
-        ((noteIndex % PENTATONIC_BAMBOO_NOTES.length) + PENTATONIC_BAMBOO_NOTES.length) %
-          PENTATONIC_BAMBOO_NOTES.length
-      ];
-
-    // Warm hollow bamboo resonance + subtle water-drop pitch bloom
-    const osc = ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(note.freq * 0.985, now);
-    osc.frequency.exponentialRampToValueAtTime(note.freq, now + 0.035);
-
-    const harmonic = ctx.createOscillator();
-    harmonic.type = 'triangle';
-    harmonic.frequency.setValueAtTime(note.freq * 2.0, now);
-
-    const env = ctx.createGain();
-    env.gain.setValueAtTime(0.0001, now);
-    env.gain.linearRampToValueAtTime(0.32, now + 0.012);
-    env.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
-
-    const harmEnv = ctx.createGain();
-    harmEnv.gain.setValueAtTime(0.0001, now);
-    harmEnv.gain.linearRampToValueAtTime(0.09, now + 0.008);
-    harmEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-
-    osc.connect(env);
-    harmonic.connect(harmEnv);
-    env.connect(this.sfxBus);
-    harmEnv.connect(this.sfxBus);
-
-    osc.start(now);
-    harmonic.start(now);
-    osc.stop(now + 0.88);
-    harmonic.stop(now + 0.2);
-  }
-
   public playShishiOdoshi(): void {
     this.unlock();
     if (!this.ctx || !this.sfxBus || this.settings.muted) return;
@@ -1058,29 +1014,6 @@ export class OnsenAudioEngine {
     cGain.connect(this.sfxBus);
     chime.start(now + 0.04);
     chime.stop(now + 0.38);
-  }
-
-  public playYarnTick(count: number): void {
-    this.unlock();
-    if (!this.ctx || !this.sfxBus || this.settings.muted) return;
-    const ctx = this.ctx;
-    const now = ctx.currentTime;
-    const isComplete = count >= YARN_MAX_COUNT;
-    const freq = isComplete
-      ? 783.99
-      : PENTATONIC_BAMBOO_NOTES[count % PENTATONIC_BAMBOO_NOTES.length].freq;
-
-    const osc = ctx.createOscillator();
-    osc.type = isComplete ? 'triangle' : 'sine';
-    osc.frequency.setValueAtTime(freq, now);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, now);
-    g.gain.linearRampToValueAtTime(isComplete ? 0.28 : 0.09, now + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.001, now + (isComplete ? 0.9 : 0.14));
-    osc.connect(g);
-    g.connect(this.sfxBus);
-    osc.start(now);
-    osc.stop(now + (isComplete ? 0.95 : 0.16));
   }
 
   public playVendingDrop(): void {
