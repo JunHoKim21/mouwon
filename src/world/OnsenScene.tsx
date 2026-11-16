@@ -41,6 +41,7 @@ import {
   SOAK_YUZU_DELAY,
   WishYuzuItem,
   computeForestWindGain,
+  computeHearthFireGain,
   computePurrProximity,
   computeWaterGain,
   detectFootstepSurface,
@@ -951,6 +952,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         setCarryingFirewood(false);
         setActionMode('idle');
         world.stokeFirewood();
+        syncedServerFireCount = Math.min(8, syncedServerFireCount + 1);
         audio.playFireStoke();
         multiplayer.sendFireStoke();
         avatar.showSpeechBubble('🔥 아궁이 활활! 노천탕이 더 따뜻해졌다냥', 3.2);
@@ -2514,6 +2516,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           computeWaterGain(playerPos.x, playerPos.z),
           computePurrProximity(playerPos.x, playerPos.z, actionMode),
           computeForestWindGain(playerPos.x, playerPos.z),
+          computeHearthFireGain(playerPos.x, playerPos.z, syncedServerFireCount),
         );
 
         // 2. Smooth Day/Night lighting & fog transition

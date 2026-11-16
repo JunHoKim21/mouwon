@@ -278,6 +278,7 @@ export class OnsenAudioEngine {
   private waterwheelSpatialGain: GainNode | null = null;
   private purrBus: GainNode | null = null;
   private purrSpatialGain: GainNode | null = null;
+  private hearthSpatialGain: GainNode | null = null;
   private sfxBus: GainNode | null = null;
 
   private pinkNoiseShort: AudioBuffer | null = null;
@@ -424,6 +425,7 @@ export class OnsenAudioEngine {
     this.createWaterwheelSound(ctx, ambientBus);
     this.createOnsenWater(ctx, ambientBus);
     this.createPurrSound(ctx, purrBus);
+    this.createHearthFireSound(ctx, purrBus);
   }
 
   private createWinterWind(ctx: AudioContext, destination: AudioNode): void {
@@ -763,6 +765,106 @@ export class OnsenAudioEngine {
     lfo.start();
   }
 
+  /**
+   * Warm ASMR hearth fire synthesizer:
+   * - Layer 1: Lowpassed (190Hz) pink noise flame rumble with slow 0.28Hz LFO swell.
+   * - Layer 2: 6.5s sparse exponential-decay crackle buffer through parallel
+   *   1450Hz / 2850Hz bandpass filters and a 3600Hz smoothing lowpass.
+   */
+  private createHearthFireSound(ctx: AudioContext, destination: AudioNode): void {
+    const spatialGain = ctx.createGain();
+    spatialGain.gain.value = 0;
+    spatialGain.connect(destination);
+    this.hearthSpatialGain = spatialGain;
+
+    // Layer 1: Warm low flame rumble
+    const flameSrc = ctx.createBufferSource();
+    flameSrc.buffer = createPinkNoiseBuffer(ctx, 5.8, 2048);
+    flameSrc.loop = true;
+
+    const flameLpf = ctx.createBiquadFilter();
+    flameLpf.type = 'lowpass';
+    flameLpf.frequency.value = 190;
+    flameLpf.Q.value = 0.6;
+
+    const flameGain = ctx.createGain();
+    flameGain.gain.value = 0.24;
+
+    const flameLfo = ctx.createOscillator();
+    flameLfo.type = 'sine';
+    flameLfo.frequency.value = 0.28;
+    const flameLfoDepth = ctx.createGain();
+    flameLfoDepth.gain.value = 0.06;
+    flameLfo.connect(flameLfoDepth);
+    flameLfoDepth.connect(flameGain.gain);
+
+    flameSrc.connect(flameLpf);
+    flameLpf.connect(flameGain);
+    flameGain.connect(spatialGain);
+
+    // Layer 2: Gentle ASMR wood crackle buffer (6.5s loop)
+    const sampleRate = ctx.sampleRate;
+    const duration = 6.5;
+    const length = Math.max(1024, Math.floor(sampleRate * duration));
+    const crackleBuffer = ctx.createBuffer(1, length, sampleRate);
+    const data = crackleBuffer.getChannelData(0);
+
+    let cursor = Math.floor(sampleRate * (0.06 + Math.random() * 0.14));
+    const tailMargin = Math.floor(sampleRate * 0.08);
+    while (cursor < length - tailMargin) {
+      const decaySec = 0.008 + Math.random() * 0.017; // 8~25ms
+      const pulseSamples = Math.floor(decaySec * 4.5 * sampleRate);
+      const amp = 0.35 + Math.random() * 0.65;
+      const attackSamples = Math.max(1, Math.floor(sampleRate * 0.0006));
+      let lp = 0;
+
+      for (let i = 0; i < pulseSamples && cursor + i < length; i++) {
+        const dt = i / sampleRate;
+        const attack = i < attackSamples ? i / attackSamples : 1;
+        const env = attack * Math.exp(-dt / decaySec);
+        const raw = Math.random() * 2 - 1;
+        lp = lp * 0.45 + raw * 0.55;
+        data[cursor + i] += lp * env * amp;
+      }
+
+      const gapSec = 0.09 + Math.random() * 0.38;
+      cursor += Math.floor(sampleRate * gapSec);
+    }
+
+    const crackleSrc = ctx.createBufferSource();
+    crackleSrc.buffer = crackleBuffer;
+    crackleSrc.loop = true;
+
+    const crackleBp1 = ctx.createBiquadFilter();
+    crackleBp1.type = 'bandpass';
+    crackleBp1.frequency.value = 1450;
+    crackleBp1.Q.value = 1.4;
+
+    const crackleBp2 = ctx.createBiquadFilter();
+    crackleBp2.type = 'bandpass';
+    crackleBp2.frequency.value = 2850;
+    crackleBp2.Q.value = 1.8;
+
+    const crackleLpf = ctx.createBiquadFilter();
+    crackleLpf.type = 'lowpass';
+    crackleLpf.frequency.value = 3600;
+    crackleLpf.Q.value = 0.7;
+
+    const crackleGain = ctx.createGain();
+    crackleGain.gain.value = 0.22;
+
+    crackleSrc.connect(crackleBp1);
+    crackleSrc.connect(crackleBp2);
+    crackleBp1.connect(crackleLpf);
+    crackleBp2.connect(crackleLpf);
+    crackleLpf.connect(crackleGain);
+    crackleGain.connect(spatialGain);
+
+    flameSrc.start();
+    flameLfo.start();
+    crackleSrc.start();
+  }
+
   public updateSettings(next: AudioMixerSettings): void {
     this.settings = { ...next };
     if (!this.ctx) return;
@@ -797,11 +899,17 @@ export class OnsenAudioEngine {
     waterGain: number,
     purrProximity: number,
     natureMix?: SpatialNatureMix,
+    hearthFireGain = 0,
   ): void {
     if (!this.ctx || this.ctx.state !== 'running') return;
     const now = this.ctx.currentTime;
     this.waterSpatialGain?.gain.setTargetAtTime(waterGain, now, 0.12);
     this.purrSpatialGain?.gain.setTargetAtTime(0.05 + purrProximity * 0.55, now, 0.18);
+    this.hearthSpatialGain?.gain.setTargetAtTime(
+      Math.max(0, Math.min(1, hearthFireGain)),
+      now,
+      0.16,
+    );
     if (natureMix) {
       this.cedarSpatialGain?.gain.setTargetAtTime(natureMix.cedarGain, now, 0.2);
       this.bambooSpatialGain?.gain.setTargetAtTime(natureMix.bambooGain, now, 0.2);

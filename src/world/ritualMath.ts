@@ -277,6 +277,37 @@ export function computeForestWindGain(x: number, z: number): SpatialNatureMix {
 }
 
 /**
+ * Computes distance-attenuated hearth fire crackling gain [0..1] near the
+ * firewood yard furnace (within 12.5m, boosted by stokedCount 0..8) and the
+ * Myoyeongak tatami hall central sunken hearth (within 9.5m).
+ */
+export function computeHearthFireGain(
+  x: number,
+  z: number,
+  stokedCount = 0,
+): number {
+  const furnaceDist = Math.hypot(
+    x - (LANDMARKS.firewoodYard.x + 2.2),
+    z - (LANDMARKS.firewoodYard.z - 0.4),
+  );
+  const clampedStoke = Math.max(0, Math.min(8, stokedCount));
+  const stokeBoost = 0.62 + (clampedStoke / 8) * 0.38;
+  const furnaceGain =
+    furnaceDist < 12.5 ? Math.pow(1 - furnaceDist / 12.5, 2) * stokeBoost : 0;
+
+  const hallHearthDist = Math.hypot(
+    x - LANDMARKS.myoyeongak.x,
+    z - LANDMARKS.myoyeongak.z,
+  );
+  const hallHearthGain =
+    hallHearthDist < 9.5
+      ? 0.58 * Math.pow(1 - hallHearthDist / 9.5, 2)
+      : 0;
+
+  return Math.max(0, Math.min(1, Math.max(furnaceGain, hallHearthGain)));
+}
+
+/**
  * Computes collective purring sound intensity [0..1] near the open-air bath,
  * Myoyeongak hearth room, or during cozy cat actions (knead/loaf/soak/groom).
  */

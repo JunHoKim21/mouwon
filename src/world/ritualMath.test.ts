@@ -11,6 +11,7 @@ import {
   YUZU_WISH_COLORS,
   clampWishMessage,
   computeForestWindGain,
+  computeHearthFireGain,
   computePurrProximity,
   computeWaterGain,
   containsBlockedWishContent,
@@ -108,6 +109,24 @@ test('computeForestWindGain responds spatially to cedar forest, bamboo grove, an
   const openBath = computeForestWindGain(0, 4);
   assert.equal(openBath.bambooGain, 0);
   assert.equal(openBath.waterwheelGain, 0);
+});
+
+test('computeHearthFireGain responds to firewood furnace stoking, tatami hall hearth, and returns 0 at bridge', () => {
+  const furnaceX = LANDMARKS.firewoodYard.x + 2.2;
+  const furnaceZ = LANDMARKS.firewoodYard.z - 0.4;
+  const furnaceGainBase = computeHearthFireGain(furnaceX + 1.0, furnaceZ, 0);
+  const furnaceGainStoked = computeHearthFireGain(furnaceX + 1.0, furnaceZ, 8);
+  assert.ok(furnaceGainBase > 0);
+  assert.ok(furnaceGainStoked > furnaceGainBase);
+  assert.equal(computeHearthFireGain(furnaceX, furnaceZ, 8), 1);
+
+  const hallGain = computeHearthFireGain(
+    LANDMARKS.myoyeongak.x + 1.2,
+    LANDMARKS.myoyeongak.z,
+  );
+  assert.ok(hallGain > 0 && hallGain <= 0.58);
+
+  assert.equal(computeHearthFireGain(0, 38), 0);
 });
 
 test('milk vending & yarn constants define 25 kneads, 4 warm drinks, and 100 yarn max', () => {
