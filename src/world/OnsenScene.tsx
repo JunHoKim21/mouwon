@@ -407,6 +407,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       canvas.style.display = 'block';
       canvas.style.width = '100%';
       canvas.style.height = '100%';
+      canvas.style.touchAction = 'none';
       canvas.setAttribute('data-testid', 'onsen-canvas');
       container.appendChild(canvas);
 
@@ -2062,6 +2063,11 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         }
       };
 
+      const onPointerCancel = () => {
+        isDragging = false;
+        canvas.style.cursor = hoveredInteractType ? 'pointer' : 'grab';
+      };
+
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
         userCameraOverrideTimer = 2.8;
@@ -2090,6 +2096,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       canvas.addEventListener('pointerleave', onPointerLeave);
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerCancel);
       canvas.addEventListener('wheel', onWheel, { passive: false });
 
       let frameId = 0;
@@ -2574,6 +2581,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         canvas.removeEventListener('pointerleave', onPointerLeave);
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerCancel);
         canvas.removeEventListener('wheel', onWheel);
         canvas.removeEventListener('webglcontextlost', onContextLost);
 
