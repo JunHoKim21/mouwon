@@ -287,6 +287,40 @@ export class OnsenAudioEngine {
   private isIndoor = false;
   private initialized = false;
   private disposed = false;
+  private suspendedByVisibility = false;
+  private visibilityListenerAttached = false;
+
+  private readonly handleVisibilityChange = (): void => {
+    if (this.disposed || !this.ctx || typeof document === 'undefined') return;
+    if (document.hidden) {
+      if (this.ctx.state === 'running') {
+        this.suspendedByVisibility = true;
+        void this.ctx.suspend().catch(() => {});
+      }
+      return;
+    }
+
+    if (
+      !this.settings.muted &&
+      (this.suspendedByVisibility || this.isContextResumable(this.ctx))
+    ) {
+      this.suspendedByVisibility = false;
+      void this.ctx.resume().catch(() => {});
+    }
+  };
+
+  private isContextResumable(ctx: AudioContext): boolean {
+    const state = ctx.state as string;
+    return state === 'suspended' || state === 'interrupted';
+  }
+
+  private ensureVisibilityListener(): void {
+    if (this.visibilityListenerAttached || typeof document === 'undefined') {
+      return;
+    }
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    this.visibilityListenerAttached = true;
+  }
 
   private indoorMultiplier(): number {
     return this.isIndoor ? 0.32 : 1.0;
@@ -294,6 +328,7 @@ export class OnsenAudioEngine {
 
   public unlock(): void {
     if (this.disposed) return;
+    this.ensureVisibilityListener();
     if (!this.ctx) {
       const AudioCtx =
         window.AudioContext ||
@@ -307,8 +342,9 @@ export class OnsenAudioEngine {
       }
       this.setupGraph(this.ctx);
     }
-    if (this.ctx.state === 'suspended') {
-      void this.ctx.resume();
+    if (this.isContextResumable(this.ctx)) {
+      this.suspendedByVisibility = false;
+      void this.ctx.resume().catch(() => {});
     }
   }
 
@@ -1279,6 +1315,11 @@ export class OnsenAudioEngine {
 
   public dispose(): void {
     this.disposed = true;
+    this.suspendedByVisibility = false;
+    if (this.visibilityListenerAttached && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+      this.visibilityListenerAttached = false;
+    }
     if (this.ctx) {
       void this.ctx.close();
       this.ctx = null;

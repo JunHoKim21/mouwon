@@ -1,6 +1,7 @@
 import {
   MAX_ROOM_YUZUS,
   ROOM_MAX_PLAYERS,
+  sanitizeRoomCode,
   type ClientPlayerPayload,
   type ClientToServerMessage,
   type RemotePeerState,
@@ -8,6 +9,7 @@ import {
 } from '../src/shared/multiplayerProtocol.ts';
 import {
   INITIAL_WISH_YUZUS,
+  validateWishMessage,
   type WishYuzuItem,
 } from '../src/world/ritualMath.ts';
 
@@ -19,6 +21,7 @@ interface PeerSession {
   state: RemotePeerState;
   send: SendMessageFn;
   lastSeenAt: number;
+  lastActionAt: Partial<Record<ClientToServerMessage['type'], number>>;
 }
 
 interface RoomState {
@@ -28,6 +31,22 @@ interface RoomState {
   wishes: WishYuzuItem[];
   fireCount: number;
 }
+
+interface ArchivedRoomState {
+  wishes: WishYuzuItem[];
+  fireCount: number;
+}
+
+const RATE_LIMIT_MS: Partial<Record<ClientToServerMessage['type'], number>> = {
+  state: 50,
+  yuzu_add: 60_000,
+  bamboo_ring: 3_000,
+  fire_stoke: 3_000,
+  milk_offer: 10_000,
+  milk_request: 10_000,
+};
+
+const MAX_ARCHIVED_ROOMS = 100;
 
 export interface RoomSummary {
   roomId: string;
@@ -53,8 +72,10 @@ export class RoomManager {
   private readonly maxPlayers: number;
   private readonly maxYuzus: number;
   private readonly rooms = new Map<string, RoomState>();
+  private readonly archivedRoomStates = new Map<string, ArchivedRoomState>();
   private readonly peerRoomIndex = new Map<string, string>();
   private nextPeerSeq = 1;
+  private nextWishSeq = 1;
 
   constructor(
     maxPlayers: number = ROOM_MAX_PLAYERS,
@@ -62,6 +83,24 @@ export class RoomManager {
   ) {
     this.maxPlayers = Math.max(1, Math.floor(maxPlayers));
     this.maxYuzus = Math.max(1, Math.floor(maxYuzus));
+  }
+
+  private createRoom(roomId: string, roomNumber: number): RoomState {
+    const archived = this.archivedRoomStates.get(roomId);
+    if (archived) {
+      this.archivedRoomStates.delete(roomId);
+    }
+    const created: RoomState = {
+      id: roomId,
+      number: roomNumber,
+      peers: new Map(),
+      wishes: archived
+        ? archived.wishes.map((w) => ({ ...w }))
+        : INITIAL_WISH_YUZUS.map((w) => ({ ...w })),
+      fireCount: archived ? archived.fireCount : 0,
+    };
+    this.rooms.set(roomId, created);
+    return created;
   }
 
   /**
@@ -73,21 +112,30 @@ export class RoomManager {
       const roomId = `room-${roomNumber}`;
       const existing = this.rooms.get(roomId);
       if (!existing) {
-        const created: RoomState = {
-          id: roomId,
-          number: roomNumber,
-          peers: new Map(),
-          wishes: INITIAL_WISH_YUZUS.map((w) => ({ ...w })),
-          fireCount: 0,
-        };
-        this.rooms.set(roomId, created);
-        return created;
+        return this.createRoom(roomId, roomNumber);
       }
       if (existing.peers.size < this.maxPlayers) {
         return existing;
       }
       roomNumber += 1;
     }
+  }
+
+  private acquireRoomForJoin(requestedRoomId?: string): RoomState {
+    const sanitized = sanitizeRoomCode(requestedRoomId);
+    if (!sanitized) {
+      return this.acquireAvailableRoom();
+    }
+    const existing = this.rooms.get(sanitized);
+    if (existing) {
+      if (existing.peers.size < this.maxPlayers) {
+        return existing;
+      }
+      return this.acquireAvailableRoom();
+    }
+    const match = /^room-(\d+)$/.exec(sanitized);
+    const roomNumber = match ? Number(match[1]) : 0;
+    return this.createRoom(sanitized, roomNumber);
   }
 
   private broadcastToRoom(
@@ -117,9 +165,10 @@ export class RoomManager {
     send: SendMessageFn,
     initialPayload?: ClientPlayerPayload,
     now: number = Date.now(),
+    requestedRoomId?: string,
   ): { peerId: string; roomId: string; roomNumber: number } {
     const peerId = `cat-${this.nextPeerSeq++}`;
-    const room = this.acquireAvailableRoom();
+    const room = this.acquireRoomForJoin(requestedRoomId);
     const state: RemotePeerState = {
       id: peerId,
       ...(initialPayload ?? DEFAULT_INITIAL_STATE),
@@ -135,6 +184,7 @@ export class RoomManager {
       state,
       send,
       lastSeenAt: now,
+      lastActionAt: {},
     };
 
     room.peers.set(peerId, session);
@@ -176,12 +226,46 @@ export class RoomManager {
     if (!deleted) return false;
 
     if (room.peers.size === 0) {
+      if (this.archivedRoomStates.has(roomId)) {
+        this.archivedRoomStates.delete(roomId);
+      }
+      this.archivedRoomStates.set(roomId, {
+        wishes: room.wishes.map((w) => ({ ...w })),
+        fireCount: room.fireCount,
+      });
+      if (this.archivedRoomStates.size > MAX_ARCHIVED_ROOMS) {
+        const oldestKey = this.archivedRoomStates.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.archivedRoomStates.delete(oldestKey);
+        }
+      }
       this.rooms.delete(roomId);
       return true;
     }
 
     this.broadcastToRoom(room, { type: 'peer_leave', peerId });
     return true;
+  }
+
+  private isRateLimited(
+    session: PeerSession,
+    type: ClientToServerMessage['type'],
+    now: number,
+  ): boolean {
+    const minInterval = RATE_LIMIT_MS[type];
+    if (minInterval === undefined) return false;
+    const prevAt = session.lastActionAt[type];
+    return prevAt !== undefined && now - prevAt < minInterval;
+  }
+
+  private recordAction(
+    session: PeerSession,
+    type: ClientToServerMessage['type'],
+    now: number,
+  ): void {
+    if (RATE_LIMIT_MS[type] !== undefined) {
+      session.lastActionAt[type] = now;
+    }
   }
 
   public handleMessage(
@@ -198,9 +282,14 @@ export class RoomManager {
 
     session.lastSeenAt = now;
 
+    if (this.isRateLimited(session, message.type, now)) {
+      return;
+    }
+
     switch (message.type) {
       case 'hello':
       case 'state': {
+        this.recordAction(session, message.type, now);
         session.state = { id: peerId, ...message.state };
         this.broadcastToRoom(
           room,
@@ -210,24 +299,30 @@ export class RoomManager {
         break;
       }
       case 'yuzu_add': {
-        const duplicate = room.wishes.some((w) => w.id === message.wish.id);
-        if (!duplicate) {
-          room.wishes = [...room.wishes, { ...message.wish }].slice(
-            -this.maxYuzus,
-          );
-          this.broadcastToRoom(
-            room,
-            {
-              type: 'yuzu_add',
-              wish: { ...message.wish },
-              fromPeerId: peerId,
-            },
-            peerId,
-          );
+        const validation = validateWishMessage(message.wish.message);
+        if (!validation.ok) {
+          return;
         }
+        this.recordAction(session, message.type, now);
+        const serverWish: WishYuzuItem = {
+          ...message.wish,
+          id: `wish-${now}-${this.nextWishSeq++}`,
+          message: validation.message,
+        };
+        room.wishes = [...room.wishes, serverWish].slice(-this.maxYuzus);
+        this.broadcastToRoom(
+          room,
+          {
+            type: 'yuzu_add',
+            wish: { ...serverWish },
+            fromPeerId: peerId,
+          },
+          peerId,
+        );
         break;
       }
       case 'fire_stoke': {
+        this.recordAction(session, message.type, now);
         room.fireCount += 1;
         this.broadcastToRoom(
           room,
@@ -241,6 +336,7 @@ export class RoomManager {
         break;
       }
       case 'bamboo_ring': {
+        this.recordAction(session, message.type, now);
         this.broadcastToRoom(
           room,
           { type: 'bamboo_ring', fromPeerId: peerId },
@@ -267,6 +363,10 @@ export class RoomManager {
         break;
       }
       case 'milk_offer': {
+        if (message.targetPeerId === peerId) {
+          return;
+        }
+        this.recordAction(session, message.type, now);
         this.sendToPeerInRoom(room, message.targetPeerId, {
           type: 'milk_offer',
           fromPeerId: peerId,
@@ -288,6 +388,10 @@ export class RoomManager {
         break;
       }
       case 'milk_request': {
+        if (message.targetPeerId === peerId) {
+          return;
+        }
+        this.recordAction(session, message.type, now);
         this.sendToPeerInRoom(room, message.targetPeerId, {
           type: 'milk_request',
           fromPeerId: peerId,

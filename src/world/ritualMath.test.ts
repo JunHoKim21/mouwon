@@ -13,10 +13,12 @@ import {
   computeForestWindGain,
   computePurrProximity,
   computeWaterGain,
+  containsBlockedWishContent,
   detectFootstepSurface,
   findNearbyInteractPrompt,
   getMilkDrinkById,
   isNearMilkVending,
+  validateWishMessage,
 } from './ritualMath';
 import {
   CEDAR_TREES,
@@ -124,6 +126,48 @@ test('wish yuzu helpers validate colors, initial wishes, and 40-char clamping', 
   const longText = '가'.repeat(55);
   assert.equal(clampWishMessage(`  ${longText}  `).length, 40);
   assert.equal(clampWishMessage('   '), '');
+  assert.equal(clampWishMessage('  오늘도\n\t수고   했어요\u0007  '), '오늘도 수고 했어요');
+});
+
+test('containsBlockedWishContent and validateWishMessage allow warm wishes and block URLs/profanity', () => {
+  const safeWishes = [
+    '오늘도 수고했어요',
+    '따뜻한 온천 잘 쉬다 갑니다',
+    '수능 대박 기원!',
+    '새로운 시발점부터 다시 화이팅',
+    '오피스에서도 건강 챙기세요',
+  ];
+  for (const wish of safeWishes) {
+    assert.equal(containsBlockedWishContent(wish), false, `Expected safe: ${wish}`);
+    assert.deepEqual(validateWishMessage(wish), { ok: true, message: wish });
+  }
+
+  assert.deepEqual(validateWishMessage('   \n\t  '), { ok: false, reason: 'empty' });
+
+  const urlWishes = [
+    '여기로 오세요 https://example.com',
+    'http://my-site.kr/event',
+    'www.naver.com 검색해보세요',
+    'open.kakao.com/o/abc1234',
+    't.me/freechannel',
+    'bit.ly/3xyz',
+  ];
+  for (const wish of urlWishes) {
+    assert.equal(containsBlockedWishContent(wish), true, `Expected URL block: ${wish}`);
+    assert.deepEqual(validateWishMessage(wish), { ok: false, reason: 'blocked_url' });
+  }
+
+  const profanityWishes = [
+    '씨발 뭐야',
+    '진짜 병신이네',
+    'fuck this',
+    '무료 바카라 추천',
+    'online casino bonus',
+  ];
+  for (const wish of profanityWishes) {
+    assert.equal(containsBlockedWishContent(wish), true, `Expected word block: ${wish}`);
+    assert.deepEqual(validateWishMessage(wish), { ok: false, reason: 'blocked_word' });
+  }
 });
 
 test('findNearbyInteractPrompt guides firewood 2-step flow and landmark interactions', () => {

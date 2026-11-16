@@ -1,6 +1,7 @@
 import type { CatCoatId } from '../world/catCoats.ts';
 import {
   clampWishMessage,
+  containsBlockedWishContent,
   type CatActionMode,
   type MilkDrinkId,
   type WishYuzuItem,
@@ -72,7 +73,7 @@ export interface RemotePeerState {
 export type ClientPlayerPayload = Omit<RemotePeerState, 'id'>;
 
 export type ClientToServerMessage =
-  | { type: 'hello'; state: ClientPlayerPayload }
+  | { type: 'hello'; state: ClientPlayerPayload; requestedRoomId?: string }
   | { type: 'state'; state: ClientPlayerPayload }
   | { type: 'yuzu_add'; wish: WishYuzuItem }
   | { type: 'fire_stoke' }
@@ -171,6 +172,12 @@ function sanitizePeerId(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+export function sanitizeRoomCode(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return /^[a-z0-9-]{1,24}$/.test(normalized) ? normalized : null;
+}
+
 export function sanitizePeerPayload(raw: unknown): ClientPlayerPayload | null {
   if (!isRecord(raw)) return null;
 
@@ -236,7 +243,11 @@ export function parseClientMessage(rawText: string): ClientToServerMessage | nul
   switch (parsed.type) {
     case 'hello': {
       const state = sanitizePeerPayload(parsed.state);
-      return state ? { type: 'hello', state } : null;
+      if (!state) return null;
+      const requestedRoomId = sanitizeRoomCode(parsed.requestedRoomId);
+      return requestedRoomId
+        ? { type: 'hello', state, requestedRoomId }
+        : { type: 'hello', state };
     }
     case 'state': {
       const state = sanitizePeerPayload(parsed.state);
@@ -244,7 +255,10 @@ export function parseClientMessage(rawText: string): ClientToServerMessage | nul
     }
     case 'yuzu_add': {
       const wish = sanitizeWishItem(parsed.wish);
-      return wish ? { type: 'yuzu_add', wish } : null;
+      if (!wish || containsBlockedWishContent(wish.message)) {
+        return null;
+      }
+      return { type: 'yuzu_add', wish };
     }
     case 'fire_stoke':
       return { type: 'fire_stoke' };

@@ -154,6 +154,7 @@ interface OnsenSceneProps {
   onMultiplayerStatusChange?: (status: MultiplayerRoomStatus) => void;
   onRoomSnapshotWishes?: (wishes: WishYuzuItem[]) => void;
   onRemoteWishReceived?: (wish: WishYuzuItem) => void;
+  onWebglContextChange?: (lost: boolean) => void;
 }
 
 const DAY_HEMI_SKY = new THREE.Color('#e4eef5');
@@ -223,6 +224,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       onMultiplayerStatusChange,
       onRoomSnapshotWishes,
       onRemoteWishReceived,
+      onWebglContextChange,
     },
     ref,
   ) {
@@ -253,6 +255,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
     const onMultiplayerStatusChangeRef = useRef(onMultiplayerStatusChange);
     const onRoomSnapshotWishesRef = useRef(onRoomSnapshotWishes);
     const onRemoteWishReceivedRef = useRef(onRemoteWishReceived);
+    const onWebglContextChangeRef = useRef(onWebglContextChange);
     onActionModeChangeRef.current = onActionModeChange;
     onZoneChangeRef.current = onZoneChange;
     onWalkingTargetChangeRef.current = onWalkingTargetChange;
@@ -271,6 +274,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
     onMultiplayerStatusChangeRef.current = onMultiplayerStatusChange;
     onRoomSnapshotWishesRef.current = onRoomSnapshotWishes;
     onRemoteWishReceivedRef.current = onRemoteWishReceived;
+    onWebglContextChangeRef.current = onWebglContextChange;
 
     const avatarRef = useRef<CatAvatarController | null>(null);
     const worldRef = useRef<OnsenWorldController | null>(null);
@@ -411,10 +415,28 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       canvas.setAttribute('data-testid', 'onsen-canvas');
       container.appendChild(canvas);
 
+      let contextLost = false;
       const onContextLost = (e: Event) => {
         e.preventDefault();
+        contextLost = true;
+        cancelAnimationFrame(rafId);
+        clearTimeout(frameId);
+        onWebglContextChangeRef.current?.(true);
+      };
+      const onContextRestored = () => {
+        if (disposed) return;
+        contextLost = false;
+        onWebglContextChangeRef.current?.(false);
+        lastTime = performance.now();
+        if (isSoftwareGl) {
+          renderer.render(scene, camera);
+          afterDraw(() => tick(true));
+        } else {
+          rafId = requestAnimationFrame(() => tick(true));
+        }
       };
       canvas.addEventListener('webglcontextlost', onContextLost);
+      canvas.addEventListener('webglcontextrestored', onContextRestored);
 
       const scene = new THREE.Scene();
       scene.background = DAY_FOG.clone();
@@ -721,7 +743,9 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         },
         onRemoteWishAdd: (wish) => {
           onRemoteWishReceivedRef.current?.(wish);
-          onShowToastRef.current?.('다른 고양이가 연못에 감사·응원 유자를 띄웠어요 🍊');
+          if (!hideRemoteCatsRef.current) {
+            onShowToastRef.current?.('다른 고양이가 연못에 감사·응원 유자를 띄웠어요 🍊');
+          }
         },
         onRemoteFireStoke: (_fromPeerId, fireCount) => {
           world.stokeFirewood();
@@ -729,16 +753,21 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
             syncedServerFireCount,
             Math.min(8, fireCount),
           );
-          audio.playFireStoke();
-          onShowToastRef.current?.('다른 고양이가 아궁이에 장작을 넣었어요 🔥');
+          if (!hideRemoteCatsRef.current) {
+            audio.playFireStoke();
+            onShowToastRef.current?.('다른 고양이가 아궁이에 장작을 넣었어요 🔥');
+          }
           forceTickRef.current?.();
         },
         onRemoteBambooRing: () => {
           world.triggerShishiOdoshi();
-          audio.playShishiOdoshi();
+          if (!hideRemoteCatsRef.current) {
+            audio.playShishiOdoshi();
+          }
           forceTickRef.current?.();
         },
         onRemoteMilkGift: (_fromPeerId, targetPeerId) => {
+          if (hideRemoteCatsRef.current) return;
           const selfId = multiplayer.getStatus().selfId;
           if (!targetPeerId || targetPeerId === selfId) {
             avatar.triggerGiftAfterglow();
@@ -748,7 +777,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
             );
           } else {
             const targetEntry = remoteEntries.get(targetPeerId);
-            if (targetEntry && !hideRemoteCatsRef.current) {
+            if (targetEntry) {
               targetEntry.avatar.triggerGiftAfterglow();
               audio.playGiftChime();
             }
@@ -756,6 +785,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           forceTickRef.current?.();
         },
         onRemoteMilkOffer: (fromPeerId, fromCoatId, drinkId) => {
+          if (hideRemoteCatsRef.current) return;
           const drink = getMilkDrinkById(drinkId) ?? MILK_DRINK_OPTIONS[0];
           const senderName = formatRemoteCatName(fromCoatId);
           audio.playMeow(1.1);
@@ -767,6 +797,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           forceTickRef.current?.();
         },
         onRemoteMilkRespond: (fromPeerId, fromCoatId, drinkId, accepted) => {
+          if (hideRemoteCatsRef.current) return;
           const drink = getMilkDrinkById(drinkId) ?? MILK_DRINK_OPTIONS[0];
           const receiverName = formatRemoteCatName(fromCoatId);
           if (accepted) {
@@ -791,6 +822,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           forceTickRef.current?.();
         },
         onRemoteMilkRequest: (fromPeerId, fromCoatId, drinkId) => {
+          if (hideRemoteCatsRef.current) return;
           const drink = getMilkDrinkById(drinkId) ?? MILK_DRINK_OPTIONS[0];
           const requesterName = formatRemoteCatName(fromCoatId);
           audio.playMeow(1.18);
@@ -802,6 +834,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           forceTickRef.current?.();
         },
         onRemoteMilkRequestDecline: (_fromPeerId, fromCoatId) => {
+          if (hideRemoteCatsRef.current) return;
           const targetName = formatRemoteCatName(fromCoatId);
           audio.playMeow(0.95);
           onShowToastRef.current?.(
@@ -1641,6 +1674,17 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           ctx.font = '500 15px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
           ctx.fillText(`${coatName}  |  ${dateStr}`, pad + 4, pad + photoH + 74);
 
+          const hostLabel =
+            typeof window !== 'undefined' && window.location?.host
+              ? window.location.host
+              : 'myoyuwon-cat-onsen.onrender.com';
+          ctx.save();
+          ctx.textAlign = 'right';
+          ctx.fillStyle = '#9a8c7a';
+          ctx.font = '500 13px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+          ctx.fillText(hostLabel, outW - pad - 4, pad + photoH + 74);
+          ctx.restore();
+
           return card.toDataURL('image/png');
         },
         standUp: () => {
@@ -2135,7 +2179,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
       }
 
       const tick = (scheduleNext = true) => {
-        if (disposed) return;
+        if (disposed || contextLost) return;
 
         const now = performance.now();
         const wallDt = Math.max(0.001, (now - lastTime) / 1000);
@@ -2584,6 +2628,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         window.removeEventListener('pointercancel', onPointerCancel);
         canvas.removeEventListener('wheel', onWheel);
         canvas.removeEventListener('webglcontextlost', onContextLost);
+        canvas.removeEventListener('webglcontextrestored', onContextRestored);
 
         if (greetNpcTimeoutId !== null) {
           window.clearTimeout(greetNpcTimeoutId);

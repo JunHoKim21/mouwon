@@ -385,7 +385,93 @@ export function detectFootstepSurface(x: number, z: number): FootstepSurface {
 }
 
 export function clampWishMessage(raw: string): string {
-  return raw.trim().slice(0, 40);
+  return raw
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40);
+}
+
+export type WishValidationFailureReason = 'empty' | 'blocked_url' | 'blocked_word';
+
+export type WishValidationResult =
+  | { ok: true; message: string }
+  | { ok: false; reason: WishValidationFailureReason };
+
+const WISH_URL_PATTERNS: readonly RegExp[] = [
+  /https?:\/\//i,
+  /ftp:\/\//i,
+  /\bwww\./i,
+  /\b(?:t\.me|open\.kakao\.com|bit\.ly|tinyurl\.com|discord\.gg|linktr\.ee|naver\.me|forms\.gle)\b/i,
+  /\bdiscord\.com\/invite\b/i,
+  /[a-z0-9-]+\.(?:com|net|org|kr|co\.kr|io|me|gg|xyz|shop|site|info|biz|tv|cc|ly|link)(?:[/?#:\s]|$)/i,
+];
+
+const BLOCKED_KO_WORDS: readonly string[] = [
+  '씨발',
+  '시발',
+  'ㅅㅂ',
+  'ㅆㅂ',
+  '병신',
+  'ㅂㅅ',
+  '지랄',
+  'ㅈㄹ',
+  '개새끼',
+  '미친놈',
+  '미친년',
+  '존나',
+  'ㅈㄴ',
+  '창녀',
+  '창놈',
+  '느금마',
+  '썅',
+  '꺼져',
+  '죽어라',
+  '성인방송',
+  '야동',
+  '섹스',
+  '바카라',
+  '카지노',
+  '먹튀',
+  '조건만남',
+  '출장안마',
+  '오피방',
+  '오피걸',
+];
+
+const BLOCKED_EN_WORD_PATTERN =
+  /\b(?:fuck|fucking|shit|bitch|asshole|bastard|dick|cock|pussy|whore|slut|cunt|nigger|faggot|porn|xxx|casino|baccarat|gambling)\b/i;
+
+function hasBlockedWishUrl(text: string): boolean {
+  return WISH_URL_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function hasBlockedWishWord(text: string): boolean {
+  if (BLOCKED_EN_WORD_PATTERN.test(text)) {
+    return true;
+  }
+  const normalized = text.replace(/시발점/g, '');
+  return BLOCKED_KO_WORDS.some((word) => normalized.includes(word));
+}
+
+export function containsBlockedWishContent(text: string): boolean {
+  const cleaned = clampWishMessage(text);
+  if (!cleaned) return false;
+  return hasBlockedWishUrl(cleaned) || hasBlockedWishWord(cleaned);
+}
+
+export function validateWishMessage(raw: string): WishValidationResult {
+  const message = clampWishMessage(raw);
+  if (!message) {
+    return { ok: false, reason: 'empty' };
+  }
+  if (hasBlockedWishUrl(message)) {
+    return { ok: false, reason: 'blocked_url' };
+  }
+  if (hasBlockedWishWord(message)) {
+    return { ok: false, reason: 'blocked_word' };
+  }
+  return { ok: true, message };
 }
 
 export type NearbyInteractKind =

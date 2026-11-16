@@ -2,6 +2,7 @@ import {
   ROOM_MAX_PLAYERS,
   WS_STATE_SEND_INTERVAL_MS,
   parseServerMessage,
+  sanitizeRoomCode,
   type ClientPlayerPayload,
   type ClientToServerMessage,
   type MultiplayerRoomStatus,
@@ -53,12 +54,22 @@ export interface MultiplayerClientCallbacks {
   ) => void;
 }
 
+function resolveRequestedRoomCode(): string | null {
+  if (typeof window === 'undefined' || !window.location) {
+    return null;
+  }
+  const params = new URLSearchParams(window.location.search);
+  return sanitizeRoomCode(params.get('room'));
+}
+
 export function resolveWebSocketUrl(): string | null {
   if (typeof window === 'undefined' || !window.location) {
     return null;
   }
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/ws`;
+  const roomCode = resolveRequestedRoomCode();
+  const query = roomCode ? `?room=${encodeURIComponent(roomCode)}` : '';
+  return `${protocol}//${window.location.host}/ws${query}`;
 }
 
 function statesEqual(a: ClientPlayerPayload, b: ClientPlayerPayload): boolean {
@@ -156,7 +167,12 @@ export class OnsenMultiplayerClient {
       if (this.disposed || this.socket !== ws) return;
       this.reconnectAttempt = 0;
       const initial = this.callbacks.getInitialState();
-      this.sendRaw({ type: 'hello', state: initial });
+      const requestedRoomId = resolveRequestedRoomCode();
+      this.sendRaw(
+        requestedRoomId
+          ? { type: 'hello', state: initial, requestedRoomId }
+          : { type: 'hello', state: initial },
+      );
       this.lastSentState = { ...initial };
       this.lastSentAt = Date.now();
     };

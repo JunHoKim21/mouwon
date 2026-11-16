@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Camera,
   ChevronDown,
@@ -12,6 +12,7 @@ import {
   EyeOff,
   Gift,
   HandHeart,
+  Info,
   MapPin,
   Moon,
   SlidersHorizontal,
@@ -79,6 +80,7 @@ export default function App() {
     useState<IncomingMilkRequestEvent | null>(null);
   const [nearbyPrompt, setNearbyPrompt] = useState<NearbyInteractPrompt | null>(null);
   const [hideRemoteCats, setHideRemoteCats] = useState(false);
+  const [webglLost, setWebglLost] = useState(false);
   const [roomStatus, setRoomStatus] = useState<MultiplayerRoomStatus>({
     state: 'offline',
     roomId: null,
@@ -109,6 +111,9 @@ export default function App() {
   const [mixerOpen, setMixerOpen] = useState(false);
   const [mixer, setMixer] = useState<AudioMixerSettings>(DEFAULT_MIXER_SETTINGS);
 
+  // Inn Notice / OSS Info Modal state
+  const [infoModalOpen, setInfoModalOpen] = useState(false);
+
   // Yuzu Wish Pond state
   const [wishes, setWishes] = useState<WishYuzuItem[]>(() => [...INITIAL_WISH_YUZUS]);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -116,6 +121,12 @@ export default function App() {
   const [wishText, setWishText] = useState('');
   const [wishError, setWishError] = useState('');
   const [readingWish, setReadingWish] = useState<WishYuzuItem | null>(null);
+  const [hiddenWishIds, setHiddenWishIds] = useState<Set<string>>(() => new Set());
+
+  const visibleWishes = useMemo(
+    () => wishes.filter((wish) => !hiddenWishIds.has(wish.id)),
+    [wishes, hiddenWishIds],
+  );
 
   const currentZoneLabel =
     TELEPORT_SPOTS.find((spot) => spot.zoneId === currentZone)?.label ?? '묘유원 정원';
@@ -127,6 +138,21 @@ export default function App() {
     ? 'bg-[#1a2030]/95 border-white/15 text-[#f4eee3]'
     : 'bg-[#fcfaf5]/95 border-[#2c251d]/15 text-[#2c251d]';
 
+  const isKakaoInApp =
+    typeof navigator !== 'undefined' && /KAKAOTALK/i.test(navigator.userAgent);
+
+  const dataUrlToBlob = (dataUrl: string): Blob => {
+    const [header, base64] = dataUrl.split(',');
+    const mimeMatch = header?.match(/data:([^;]+);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const binary = atob(base64 ?? '');
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mime });
+  };
+
   const triggerDownloadPolaroid = (dataUrl: string) => {
     const link = document.createElement('a');
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
@@ -137,11 +163,54 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  const handleSaveOrSharePolaroid = async (dataUrl: string) => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        const blob = dataUrlToBlob(dataUrl);
+        const file = new File([blob], `myoyuwon-polaroid-${stamp}.png`, {
+          type: 'image/png',
+        });
+        if (
+          typeof navigator.canShare === 'function' &&
+          navigator.canShare({ files: [file] })
+        ) {
+          await navigator.share({
+            files: [file],
+            title: '묘유원 추억 사진',
+          });
+          return;
+        }
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+    }
+    triggerDownloadPolaroid(dataUrl);
+  };
+
   const handleCapturePolaroid = () => {
     const dataUrl = sceneRef.current?.capturePolaroid();
     if (!dataUrl) return;
-    triggerDownloadPolaroid(dataUrl);
+    if (!isKakaoInApp && typeof navigator?.share !== 'function') {
+      triggerDownloadPolaroid(dataUrl);
+    }
     setPolaroidUrl(dataUrl);
+  };
+
+  const handleCopyRoomInvite = () => {
+    if (roomStatus.state !== 'connected' || !roomStatus.roomId) return;
+    const inviteUrl = new URL(window.location.href);
+    inviteUrl.searchParams.set('room', roomStatus.roomId);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(inviteUrl.toString())
+        .then(() => showToast('방 초대 링크가 복사되었어요.'))
+        .catch(() => showToast('초대 링크 복사에 실패했어요.'));
+    } else {
+      showToast('이 브라우저에서는 클립보드 복사를 지원하지 않아요.');
+    }
   };
 
   const handleSubmitWish = (e: FormEvent) => {
@@ -290,6 +359,7 @@ export default function App() {
         setCoatMenuOpen(false);
         setTeleportOpen(false);
         setMixerOpen(false);
+        setInfoModalOpen(false);
       }
       setUiIdle(false);
       scheduleFade();
@@ -323,6 +393,7 @@ export default function App() {
     teleportOpen ||
     mixerOpen ||
     coatMenuOpen ||
+    infoModalOpen ||
     heldMilk !== null ||
     nearbyPrompt !== null ||
     walkingTargetLabel !== null;
@@ -341,7 +412,7 @@ export default function App() {
         ref={sceneRef}
         coatId={coatId}
         timeOfDay={timeOfDay}
-        wishYuzus={wishes}
+        wishYuzus={visibleWishes}
         mixerSettings={mixer}
         trainActive={trainActive}
         hideRemoteCats={hideRemoteCats}
@@ -371,6 +442,7 @@ export default function App() {
         onMultiplayerStatusChange={setRoomStatus}
         onRoomSnapshotWishes={handleRoomSnapshotWishes}
         onRemoteWishReceived={handleRemoteWishReceived}
+        onWebglContextChange={setWebglLost}
       />
 
       {/* Top Floating Bar: Brand Title + Coat Dropdown (Left) + Teleport, Photo, Sound & Day/Night (Right) */}
@@ -468,36 +540,50 @@ export default function App() {
             )}
           </div>
 
-          <div
-            data-testid="room-status-badge"
-            title={
-              roomStatus.state === 'connected'
-                ? `실시간 온천 방 ${roomStatus.roomNumber ?? 1}번 (${roomStatus.peerCount}/${roomStatus.maxPeers}명)`
-                : '서버 미연결 (혼자서도 모든 온천 기능을 이용할 수 있어요)'
-            }
-            className={`flex items-center gap-1.5 rounded-xl px-2 py-1.5 sm:px-2.5 sm:py-2 text-[11px] sm:text-xs font-medium border whitespace-nowrap shrink-0 ${surfaceCls}`}
-          >
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${
-                roomStatus.state === 'connected'
-                  ? 'bg-emerald-500'
-                  : roomStatus.state === 'connecting'
-                    ? 'bg-amber-400 animate-pulse'
-                    : isNight
-                      ? 'bg-[#d8cbb6]/45'
-                      : 'bg-[#5a4e40]/40'
-              }`}
-              aria-hidden="true"
-            />
-            <Users className="w-3.5 h-3.5 opacity-80 shrink-0 hidden sm:inline" aria-hidden="true" />
-            <span>
-              {roomStatus.state === 'connected'
-                ? `${roomStatus.roomNumber ?? 1}번 방 · ${roomStatus.peerCount}/${roomStatus.maxPeers}`
-                : roomStatus.state === 'connecting'
-                  ? '연결 중'
-                  : '오프라인'}
-            </span>
-          </div>
+          {(() => {
+            const roomLabel =
+              roomStatus.roomNumber && roomStatus.roomNumber > 0
+                ? `${roomStatus.roomNumber}번 방`
+                : (roomStatus.roomId ?? '1번 방');
+            const isConnected = roomStatus.state === 'connected';
+            return (
+              <button
+                type="button"
+                data-testid="room-status-badge"
+                onClick={isConnected ? handleCopyRoomInvite : undefined}
+                disabled={!isConnected}
+                title={
+                  isConnected
+                    ? `실시간 온천 ${roomLabel} (${roomStatus.peerCount}/${roomStatus.maxPeers}명) · 클릭하여 초대 링크 복사`
+                    : '서버 미연결 (혼자서도 모든 온천 기능을 이용할 수 있어요)'
+                }
+                className={`flex items-center gap-1.5 rounded-xl px-2 py-1.5 sm:px-2.5 sm:py-2 text-[11px] sm:text-xs font-medium border whitespace-nowrap shrink-0 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d9842b] ${
+                  isConnected ? 'cursor-pointer hover:opacity-90' : 'cursor-default'
+                } ${surfaceCls}`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    isConnected
+                      ? 'bg-emerald-500'
+                      : roomStatus.state === 'connecting'
+                        ? 'bg-amber-400 animate-pulse'
+                        : isNight
+                          ? 'bg-[#d8cbb6]/45'
+                          : 'bg-[#5a4e40]/40'
+                  }`}
+                  aria-hidden="true"
+                />
+                <Users className="w-3.5 h-3.5 opacity-80 shrink-0 hidden sm:inline" aria-hidden="true" />
+                <span>
+                  {isConnected
+                    ? `${roomLabel} · ${roomStatus.peerCount}/${roomStatus.maxPeers}`
+                    : roomStatus.state === 'connecting'
+                      ? '연결 중'
+                      : '오프라인'}
+                </span>
+              </button>
+            );
+          })()}
 
           {roomStatus.state === 'connected' && (
             <button
@@ -645,6 +731,22 @@ export default function App() {
             )}
           </button>
 
+          <button
+            type="button"
+            onClick={() => {
+              setTeleportOpen(false);
+              setCoatMenuOpen(false);
+              setMixerOpen(false);
+              setInfoModalOpen((prev) => !prev);
+            }}
+            aria-expanded={infoModalOpen}
+            aria-label="여관 안내 및 라이선스"
+            title="여관 안내"
+            className={`flex items-center justify-center rounded-full p-1.5 sm:p-2 border shrink-0 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d9842b] ${surfaceCls}`}
+          >
+            <Info className="w-3.5 h-3.5 sm:w-4 sm:h-4 opacity-80" aria-hidden="true" />
+          </button>
+
           {mixerOpen && (
             <div
               role="region"
@@ -736,6 +838,88 @@ export default function App() {
           )}
         </div>
       </header>
+
+      {/* Inn Notice & Open-Source License Modal */}
+      {infoModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inn-info-title"
+          onClick={() => setInfoModalOpen(false)}
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/35 p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`w-full max-w-md rounded-2xl p-5 border shadow-2xl ${surfaceCls}`}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Info className="w-4 h-4 text-[#d9842b]" aria-hidden="true" />
+                <h2 id="inn-info-title" className="text-base font-semibold">
+                  묘유원(猫湯院) 여관 안내
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInfoModalOpen(false)}
+                aria-label="여관 안내 닫기"
+                className="rounded-lg p-1.5 opacity-70 hover:opacity-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs leading-relaxed">
+              <section>
+                <h3 className="font-semibold mb-1 text-[#d9842b]">이용 안내</h3>
+                <p className="opacity-85">
+                  묘유원은 실시간 채팅 없이 몸짓과 고양이 울음소리, 우유 건네기로 교감하는
+                  비언어적 힐링 온천 공간입니다. 연못에 띄운 유자 쪽지는 별도의 회원 정보 없이
+                  익명·임시로 저장됩니다.
+                </p>
+              </section>
+
+              <section>
+                <h3 className="font-semibold mb-1 text-[#d9842b]">부적절한 쪽지 관리</h3>
+                <p className="opacity-85">
+                  유자 쪽지 읽기 창 하단의 <strong>이 쪽지 가리기</strong> 버튼으로 원치 않는
+                  쪽지를 즉시 화면에서 숨길 수 있습니다. 부적절한 표현이나 광고성 문구를
+                  발견하시면 운영자 이메일(
+                  <a
+                    href="mailto:glaive66@gmail.com"
+                    className="underline decoration-dotted hover:opacity-100"
+                  >
+                    glaive66@gmail.com
+                  </a>
+                  )로 알려주세요.
+                </p>
+              </section>
+
+              <section
+                className={`pt-2.5 border-t ${
+                  isNight ? 'border-white/10' : 'border-[#2c251d]/10'
+                }`}
+              >
+                <h3 className="font-semibold mb-1 opacity-90">오픈소스 라이선스 고지</h3>
+                <p className="opacity-75">
+                  본 서비스는 Three.js, React, Express, ws, Lucide React, Tailwind CSS
+                  (MIT / ISC License) 등의 오픈소스 소프트웨어를 사용하여 제작되었습니다.
+                </p>
+              </section>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setInfoModalOpen(false)}
+                className="rounded-xl px-4 py-2 text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c57522] cursor-pointer"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Wish Yuzu Composer Modal */}
       {composerOpen && (
@@ -837,22 +1021,42 @@ export default function App() {
           className="fixed inset-x-0 top-16 z-30 flex justify-center px-4 pointer-events-none"
         >
           <div
-            className={`pointer-events-auto flex items-center gap-3 max-w-md rounded-2xl px-4 py-3 border shadow-xl ${surfaceCls}`}
+            className={`pointer-events-auto flex flex-col gap-2 max-w-md rounded-2xl px-4 py-3 border shadow-xl ${surfaceCls}`}
           >
-            <span
-              className="w-4 h-4 rounded-full shrink-0 border border-black/15"
-              style={{ backgroundColor: readingWish.colorHex }}
-              aria-hidden="true"
-            />
-            <p className="text-sm font-medium leading-snug">{readingWish.message}</p>
-            <button
-              type="button"
-              onClick={() => setReadingWish(null)}
-              aria-label="쪽지 읽기 닫기"
-              className="rounded-lg p-1 opacity-70 hover:opacity-100 cursor-pointer shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-3">
+              <span
+                className="w-4 h-4 rounded-full shrink-0 border border-black/15"
+                style={{ backgroundColor: readingWish.colorHex }}
+                aria-hidden="true"
+              />
+              <p className="text-sm font-medium leading-snug">{readingWish.message}</p>
+              <button
+                type="button"
+                onClick={() => setReadingWish(null)}
+                aria-label="쪽지 읽기 닫기"
+                className="rounded-lg p-1 opacity-70 hover:opacity-100 cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  const targetId = readingWish.id;
+                  setHiddenWishIds((prev) => {
+                    const next = new Set(prev);
+                    next.add(targetId);
+                    return next;
+                  });
+                  setReadingWish(null);
+                  showToast('이 유자 쪽지를 화면에서 가렸어요.');
+                }}
+                className="rounded-lg px-2 py-1 text-[11px] font-medium opacity-65 hover:opacity-100 hover:bg-black/5 cursor-pointer"
+              >
+                이 쪽지 가리기
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1003,6 +1207,29 @@ export default function App() {
         </div>
       )}
 
+      {/* WebGL Context Lost Recovery Banner */}
+      {webglLost && (
+        <div
+          role="alert"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
+        >
+          <div
+            className={`w-full max-w-sm rounded-2xl p-5 border shadow-2xl text-center space-y-3 ${surfaceCls}`}
+          >
+            <p className="text-sm font-medium leading-relaxed">
+              화면 그래픽 연결이 잠시 끊겼어요. 복구 중이거나 새로고침해 주세요.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex items-center justify-center rounded-xl px-4 py-2 text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] cursor-pointer"
+            >
+              새로고침
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Memory Photo Preview Modal (strictly unmounted when closed) */}
       {polaroidUrl && (
         <div
@@ -1028,7 +1255,18 @@ export default function App() {
               alt="묘유원 추억 사진"
               className="w-full rounded-lg border border-black/10 shadow-sm"
             />
-            <div className="mt-3 flex items-center justify-end gap-2">
+            <p className="mt-2 text-[11px] leading-relaxed opacity-70 text-center">
+              모바일·카톡에서는 이미지를 길게 눌러 저장할 수 있어요
+            </p>
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+              {isKakaoInApp && typeof window !== 'undefined' && (
+                <a
+                  href={`kakaotalk://web/openExternal?url=${encodeURIComponent(window.location.href)}`}
+                  className="mr-auto rounded-xl px-2.5 py-1.5 text-[11px] font-medium border border-[#d9842b]/45 text-[#d9842b] hover:bg-[#d9842b]/10 cursor-pointer"
+                >
+                  외부 브라우저로 열기
+                </a>
+              )}
               <button
                 type="button"
                 onClick={() => setPolaroidUrl(null)}
@@ -1038,7 +1276,7 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => triggerDownloadPolaroid(polaroidUrl)}
+                onClick={() => void handleSaveOrSharePolaroid(polaroidUrl)}
                 className="flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-semibold bg-[#d9842b] text-white hover:bg-[#c47422] cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" aria-hidden="true" />
