@@ -574,6 +574,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         | 'idle'
         | null = null;
       let pendingArrivalHeading: number | null = null;
+      let pendingArrivalPos: { x: number; z: number } | null = null;
       let pendingSocialTarget: MilkSocialTargetInfo | null = null;
       let pendingSocialDrinkId: MilkDrinkId = 'banana';
       let snapCameraNextTick = false;
@@ -917,6 +918,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         walkSpeedMode = 'normal';
         pendingArrivalAction = null;
         pendingArrivalHeading = null;
+        pendingArrivalPos = null;
         pendingSocialTarget = null;
         setWalkingTarget(null);
         world.setDestinationMarker(0, 0, 0, false);
@@ -1115,14 +1117,29 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         forceTickRef.current?.();
       };
 
+      const isSeatArrivalAction = (
+        arrival: typeof pendingArrivalAction,
+      ): boolean =>
+        arrival === 'footSoak' ||
+        arrival === 'sitBench' ||
+        arrival === 'knead' ||
+        arrival === 'groom';
+
       const executeArrival = (
         arrival: typeof pendingArrivalAction,
         heading: number | null,
+        seatPos: { x: number; z: number } | null = null,
       ) => {
         const socialTarget = pendingSocialTarget;
         const socialDrinkId = pendingSocialDrinkId;
         pendingSocialTarget = null;
         if (arrival !== 'soak' && heading !== null) playerHeading = heading;
+        const shouldSnapToSeat =
+          seatPos !== null && isSeatArrivalAction(arrival);
+        if (shouldSnapToSeat) {
+          playerPos.x = seatPos.x;
+          playerPos.z = seatPos.z;
+        }
         if (arrival === 'sitBench') {
           setActionMode('sitBench');
         } else if (arrival === 'footSoak') {
@@ -1160,6 +1177,11 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
                 : 'idle',
           );
         }
+        if (shouldSnapToSeat) {
+          avatar.root.position.set(playerPos.x, playerPos.y, playerPos.z);
+          avatar.root.rotation.y = playerHeading;
+          multiplayer.sendState(getPlayerPayload(0), Date.now(), true);
+        }
       };
 
       const getOccupiedCushionPositions = (): Vec2[] => {
@@ -1184,13 +1206,15 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           playerPos.z,
           getOccupiedCushionPositions(),
         );
+        const cushionPos = { x: cushion.x, z: cushion.z };
         if (Math.hypot(cushion.x - playerPos.x, cushion.z - playerPos.z) <= 0.32) {
-          executeArrival(action, cushion.heading);
+          executeArrival(action, cushion.heading, cushionPos);
         } else {
           onShowToastRef.current?.(toastMessage);
           startWalkPath(cushion.x, cushion.z, {
             arrivalAction: action,
             headingOnArrival: cushion.heading,
+            arrivalPos: cushionPos,
             speedMode: 'normal',
             label: null,
           });
@@ -1203,6 +1227,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         opts: {
           arrivalAction?: typeof pendingArrivalAction;
           headingOnArrival?: number;
+          arrivalPos?: { x: number; z: number } | null;
           speedMode?: 'normal' | 'journey';
           label?: string | null;
         } = {},
@@ -1213,6 +1238,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           executeArrival(
             opts.arrivalAction ?? null,
             opts.headingOnArrival ?? null,
+            opts.arrivalPos ?? null,
           );
           forceTickRef.current?.();
           return;
@@ -1226,6 +1252,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         walkSpeedMode = opts.speedMode ?? 'normal';
         pendingArrivalAction = opts.arrivalAction ?? null;
         pendingArrivalHeading = opts.headingOnArrival ?? null;
+        pendingArrivalPos = opts.arrivalPos ?? null;
         setWalkingTarget(opts.label ?? null);
         const lastWp = walkQueue[walkQueue.length - 1];
         if (lastWp) {
@@ -1272,11 +1299,14 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           arrivalAction === 'milk_request'
             ? 0.65
             : 0.35;
+        const arrivalPos = isSeatArrivalAction(arrivalAction)
+          ? { x: destX, z: destZ }
+          : null;
         if (dist <= immediateRadius) {
           clearWalkJourney();
           pendingSocialTarget = socialTarget ?? null;
           pendingSocialDrinkId = socialDrinkId;
-          executeArrival(arrivalAction, headingOnArrival ?? null);
+          executeArrival(arrivalAction, headingOnArrival ?? null, arrivalPos);
           forceTickRef.current?.();
           return;
         }
@@ -1284,6 +1314,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
         startWalkPath(destX, destZ, {
           arrivalAction,
           headingOnArrival,
+          arrivalPos,
           speedMode: 'normal',
           label: null,
         });
@@ -1591,19 +1622,22 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
             targetHeading = seat.heading;
           }
 
+          const arrivalAction =
+            spot.mode === 'idle' && carryingFirewood ? null : spot.mode;
+          const arrivalPos = isSeatArrivalAction(spot.mode)
+            ? { x: targetX, z: targetZ }
+            : null;
           const dist = Math.hypot(targetX - playerPos.x, targetZ - playerPos.z);
           if (dist <= 0.35) {
             clearWalkJourney();
-            executeArrival(
-              spot.mode === 'idle' && carryingFirewood ? null : spot.mode,
-              targetHeading,
-            );
+            executeArrival(arrivalAction, targetHeading, arrivalPos);
             forceTickRef.current?.();
             return;
           }
           startWalkPath(targetX, targetZ, {
             arrivalAction: spot.mode,
             headingOnArrival: targetHeading,
+            arrivalPos,
             speedMode: 'journey',
             label: spot.label,
           });
@@ -2239,8 +2273,9 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           if (walkQueue.length === 1 && dist <= 0.25) {
             const arrival = pendingArrivalAction;
             const arrivalHeading = pendingArrivalHeading;
+            const arrivalPos = pendingArrivalPos;
             clearWalkJourney();
-            executeArrival(arrival, arrivalHeading);
+            executeArrival(arrival, arrivalHeading, arrivalPos);
           } else {
             moveDirX = dx / (dist || 1);
             moveDirZ = dz / (dist || 1);
@@ -2350,7 +2385,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           actionMode === 'sitBench'
             ? 0.34
             : actionMode === 'footSoak'
-              ? FOOTBATH_DECK_HEIGHT
+              ? FOOTBATH_DECK_HEIGHT + 0.025
               : groundHeightAt(playerPos.x, playerPos.z);
         playerPos.y = THREE.MathUtils.damp(playerPos.y, targetGroundY, 12, dt);
 
