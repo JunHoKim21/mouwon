@@ -54,7 +54,7 @@ export default function App() {
   const sceneRef = useRef<OnsenSceneHandle | null>(null);
 
   const [coatId, setCoatId] = useState<CatCoatId>('cheese');
-  const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>('day');
+  const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>('night');
   const [actionMode, setActionMode] = useState<CatActionMode>('idle');
   const [currentZone, setCurrentZone] = useState<WorldZoneId>('entrance');
   const [walkingTargetLabel, setWalkingTargetLabel] = useState<string | null>(null);
