@@ -28,6 +28,7 @@ import {
 } from './shared/multiplayerProtocol';
 import { AudioMixerSettings, DEFAULT_MIXER_SETTINGS } from './audio/onsenAudio';
 import { MilkBottleIllustration } from './components/MilkVendingModal';
+import { trackEvent } from './utils/analytics';
 import { CAT_COATS, CatCoatId, getCatCoatById } from './world/catCoats';
 import {
   IncomingMilkOfferEvent,
@@ -179,6 +180,7 @@ export default function App() {
             files: [file],
             title: '묘유원 추억 사진',
           });
+          trackEvent('share_polaroid', { method: 'web_share' });
           return;
         }
       }
@@ -188,6 +190,7 @@ export default function App() {
       }
     }
     triggerDownloadPolaroid(dataUrl);
+    trackEvent('share_polaroid', { method: 'download' });
   };
 
   const handleCapturePolaroid = () => {
@@ -197,6 +200,7 @@ export default function App() {
       triggerDownloadPolaroid(dataUrl);
     }
     setPolaroidUrl(dataUrl);
+    trackEvent('capture_polaroid');
   };
 
   const handleCopyRoomInvite = () => {
@@ -206,7 +210,10 @@ export default function App() {
     if (navigator.clipboard?.writeText) {
       navigator.clipboard
         .writeText(inviteUrl.toString())
-        .then(() => showToast('방 초대 링크가 복사되었어요.'))
+        .then(() => {
+          showToast('방 초대 링크가 복사되었어요.');
+          trackEvent('copy_room_invite');
+        })
         .catch(() => showToast('초대 링크 복사에 실패했어요.'));
     } else {
       showToast('이 브라우저에서는 클립보드 복사를 지원하지 않아요.');

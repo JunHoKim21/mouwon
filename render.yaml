@@ -11,3 +11,5 @@ services:
         value: production
       - key: NODE_VERSION
         value: 22.14.0
+      - key: VITE_GA_MEASUREMENT_ID
+        value: G-84QYJ7JSZW
