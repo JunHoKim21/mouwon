@@ -766,10 +766,11 @@ export class OnsenAudioEngine {
   }
 
   /**
-   * Warm ASMR hearth fire synthesizer:
-   * - Layer 1: Lowpassed (190Hz) pink noise flame rumble with slow 0.28Hz LFO swell.
-   * - Layer 2: 6.5s sparse exponential-decay crackle buffer through parallel
-   *   1450Hz / 2850Hz bandpass filters and a 3600Hz smoothing lowpass.
+   * Natural 3-layer hearth fire synthesizer:
+   * - Layer 1: Warm main flame body (85Hz HPF -> 460Hz LPF pink noise) modulated by dual slow LFOs (0.21Hz, 0.53Hz).
+   * - Layer 2: Soft ember sizzle (1650Hz BPF -> 3200Hz LPF pink noise) modulated by 0.37Hz + 0.89Hz LFOs.
+   * - Layer 3: Dual asynchronous non-periodic wood crackle loops (11.3s & 13.7s @ 0.93x) with clustered micro-pulses
+   *   and per-pulse 1-pole lowpass tone variation through smooth 650Hz HPF -> 3800Hz LPF.
    */
   private createHearthFireSound(ctx: AudioContext, destination: AudioNode): void {
     const spatialGain = ctx.createGain();
@@ -777,92 +778,177 @@ export class OnsenAudioEngine {
     spatialGain.connect(destination);
     this.hearthSpatialGain = spatialGain;
 
-    // Layer 1: Warm low flame rumble
+    // Layer 1: Cozy main flame body (dominant warm combustion rumble)
     const flameSrc = ctx.createBufferSource();
-    flameSrc.buffer = createPinkNoiseBuffer(ctx, 5.8, 2048);
+    flameSrc.buffer = createPinkNoiseBuffer(ctx, 7.3, 2048);
     flameSrc.loop = true;
+
+    const flameHpf = ctx.createBiquadFilter();
+    flameHpf.type = 'highpass';
+    flameHpf.frequency.value = 85;
+    flameHpf.Q.value = 0.5;
 
     const flameLpf = ctx.createBiquadFilter();
     flameLpf.type = 'lowpass';
-    flameLpf.frequency.value = 190;
-    flameLpf.Q.value = 0.6;
+    flameLpf.frequency.value = 460;
+    flameLpf.Q.value = 0.5;
 
     const flameGain = ctx.createGain();
-    flameGain.gain.value = 0.24;
+    flameGain.gain.value = 0.30;
 
-    const flameLfo = ctx.createOscillator();
-    flameLfo.type = 'sine';
-    flameLfo.frequency.value = 0.28;
-    const flameLfoDepth = ctx.createGain();
-    flameLfoDepth.gain.value = 0.06;
-    flameLfo.connect(flameLfoDepth);
-    flameLfoDepth.connect(flameGain.gain);
+    const flameLfoA = ctx.createOscillator();
+    flameLfoA.type = 'sine';
+    flameLfoA.frequency.value = 0.21;
 
-    flameSrc.connect(flameLpf);
+    const flameLfoB = ctx.createOscillator();
+    flameLfoB.type = 'sine';
+    flameLfoB.frequency.value = 0.53;
+
+    // Dual non-integer LFOs gently modulate cutoff (±150Hz) and gain (0.30 ± 0.07)
+    const flameFreqDepthA = ctx.createGain();
+    flameFreqDepthA.gain.value = 105;
+    flameLfoA.connect(flameFreqDepthA);
+    flameFreqDepthA.connect(flameLpf.frequency);
+
+    const flameFreqDepthB = ctx.createGain();
+    flameFreqDepthB.gain.value = 45;
+    flameLfoB.connect(flameFreqDepthB);
+    flameFreqDepthB.connect(flameLpf.frequency);
+
+    const flameGainDepthA = ctx.createGain();
+    flameGainDepthA.gain.value = 0.048;
+    flameLfoA.connect(flameGainDepthA);
+    flameGainDepthA.connect(flameGain.gain);
+
+    const flameGainDepthB = ctx.createGain();
+    flameGainDepthB.gain.value = 0.022;
+    flameLfoB.connect(flameGainDepthB);
+    flameGainDepthB.connect(flameGain.gain);
+
+    flameSrc.connect(flameHpf);
+    flameHpf.connect(flameLpf);
     flameLpf.connect(flameGain);
     flameGain.connect(spatialGain);
 
-    // Layer 2: Gentle ASMR wood crackle buffer (6.5s loop)
+    // Layer 2: Soft ember & wood-moisture sizzle
+    const sizzleSrc = ctx.createBufferSource();
+    sizzleSrc.buffer = createPinkNoiseBuffer(ctx, 9.7, 2048);
+    sizzleSrc.loop = true;
+
+    const sizzleBp = ctx.createBiquadFilter();
+    sizzleBp.type = 'bandpass';
+    sizzleBp.frequency.value = 1650;
+    sizzleBp.Q.value = 0.45;
+
+    const sizzleLpf = ctx.createBiquadFilter();
+    sizzleLpf.type = 'lowpass';
+    sizzleLpf.frequency.value = 3200;
+    sizzleLpf.Q.value = 0.5;
+
+    const sizzleGain = ctx.createGain();
+    sizzleGain.gain.value = 0.055;
+
+    const sizzleLfoA = ctx.createOscillator();
+    sizzleLfoA.type = 'sine';
+    sizzleLfoA.frequency.value = 0.37;
+    const sizzleDepthA = ctx.createGain();
+    sizzleDepthA.gain.value = 0.014;
+    sizzleLfoA.connect(sizzleDepthA);
+    sizzleDepthA.connect(sizzleGain.gain);
+
+    const sizzleLfoB = ctx.createOscillator();
+    sizzleLfoB.type = 'sine';
+    sizzleLfoB.frequency.value = 0.89;
+    const sizzleDepthB = ctx.createGain();
+    sizzleDepthB.gain.value = 0.008;
+    sizzleLfoB.connect(sizzleDepthB);
+    sizzleDepthB.connect(sizzleGain.gain);
+
+    sizzleSrc.connect(sizzleBp);
+    sizzleBp.connect(sizzleLpf);
+    sizzleLpf.connect(sizzleGain);
+    sizzleGain.connect(spatialGain);
+
+    // Layer 3: Natural non-periodic wood crackle (dual asynchronous loops)
     const sampleRate = ctx.sampleRate;
-    const duration = 6.5;
-    const length = Math.max(1024, Math.floor(sampleRate * duration));
-    const crackleBuffer = ctx.createBuffer(1, length, sampleRate);
-    const data = crackleBuffer.getChannelData(0);
+    const buildCrackleBuffer = (durationSec: number): AudioBuffer => {
+      const length = Math.max(1024, Math.floor(sampleRate * durationSec));
+      const buffer = ctx.createBuffer(1, length, sampleRate);
+      const data = buffer.getChannelData(0);
 
-    let cursor = Math.floor(sampleRate * (0.06 + Math.random() * 0.14));
-    const tailMargin = Math.floor(sampleRate * 0.08);
-    while (cursor < length - tailMargin) {
-      const decaySec = 0.008 + Math.random() * 0.017; // 8~25ms
-      const pulseSamples = Math.floor(decaySec * 4.5 * sampleRate);
-      const amp = 0.35 + Math.random() * 0.65;
-      const attackSamples = Math.max(1, Math.floor(sampleRate * 0.0006));
-      let lp = 0;
+      let cursor = Math.floor(sampleRate * (0.12 + Math.random() * 0.48));
+      const tailMargin = Math.floor(sampleRate * 0.08);
+      const attackSamples = Math.max(1, Math.floor(sampleRate * 0.0005));
 
-      for (let i = 0; i < pulseSamples && cursor + i < length; i++) {
-        const dt = i / sampleRate;
-        const attack = i < attackSamples ? i / attackSamples : 1;
-        const env = attack * Math.exp(-dt / decaySec);
-        const raw = Math.random() * 2 - 1;
-        lp = lp * 0.45 + raw * 0.55;
-        data[cursor + i] += lp * env * amp;
+      while (cursor < length - tailMargin) {
+        if (Math.random() < 0.55) {
+          // Quiet pause between crackle clusters (0.45 ~ 2.1s)
+          cursor += Math.floor(sampleRate * (0.45 + Math.random() * 1.65));
+          continue;
+        }
+
+        // Cluster of 2~4 small pulses spaced 0.025 ~ 0.095s apart
+        const clusterCount = 2 + Math.floor(Math.random() * 3);
+        for (let p = 0; p < clusterCount && cursor < length - tailMargin; p++) {
+          const decaySec = 0.003 + Math.random() * 0.011; // 3 ~ 14ms
+          const pulseSamples = Math.floor(decaySec * 5.0 * sampleRate);
+          const amp = 0.15 + Math.random() * 0.6; // 0.15 ~ 0.75
+          const alpha = 0.12 + Math.random() * 0.73; // 0.12 ~ 0.85 per-pulse 1-pole LPF
+          let lp = 0;
+
+          for (let i = 0; i < pulseSamples && cursor + i < length; i++) {
+            const dt = i / sampleRate;
+            const attack = i < attackSamples ? i / attackSamples : 1;
+            const env = attack * Math.exp(-dt / decaySec);
+            const raw = Math.random() * 2 - 1;
+            lp += alpha * (raw - lp);
+            data[cursor + i] += lp * env * amp;
+          }
+
+          const stepSec = 0.025 + Math.random() * 0.07; // 0.025 ~ 0.095s
+          cursor += Math.floor(sampleRate * stepSec);
+        }
       }
 
-      const gapSec = 0.09 + Math.random() * 0.38;
-      cursor += Math.floor(sampleRate * gapSec);
-    }
+      return buffer;
+    };
 
-    const crackleSrc = ctx.createBufferSource();
-    crackleSrc.buffer = crackleBuffer;
-    crackleSrc.loop = true;
+    const crackleSrcA = ctx.createBufferSource();
+    crackleSrcA.buffer = buildCrackleBuffer(11.3);
+    crackleSrcA.loop = true;
 
-    const crackleBp1 = ctx.createBiquadFilter();
-    crackleBp1.type = 'bandpass';
-    crackleBp1.frequency.value = 1450;
-    crackleBp1.Q.value = 1.4;
+    const crackleSrcB = ctx.createBufferSource();
+    crackleSrcB.buffer = buildCrackleBuffer(13.7);
+    crackleSrcB.loop = true;
+    crackleSrcB.playbackRate.value = 0.93;
 
-    const crackleBp2 = ctx.createBiquadFilter();
-    crackleBp2.type = 'bandpass';
-    crackleBp2.frequency.value = 2850;
-    crackleBp2.Q.value = 1.8;
+    const crackleHpf = ctx.createBiquadFilter();
+    crackleHpf.type = 'highpass';
+    crackleHpf.frequency.value = 650;
+    crackleHpf.Q.value = 0.5;
 
     const crackleLpf = ctx.createBiquadFilter();
     crackleLpf.type = 'lowpass';
-    crackleLpf.frequency.value = 3600;
-    crackleLpf.Q.value = 0.7;
+    crackleLpf.frequency.value = 3800;
+    crackleLpf.Q.value = 0.55;
 
     const crackleGain = ctx.createGain();
-    crackleGain.gain.value = 0.22;
+    crackleGain.gain.value = 0.085;
 
-    crackleSrc.connect(crackleBp1);
-    crackleSrc.connect(crackleBp2);
-    crackleBp1.connect(crackleLpf);
-    crackleBp2.connect(crackleLpf);
+    crackleSrcA.connect(crackleHpf);
+    crackleSrcB.connect(crackleHpf);
+    crackleHpf.connect(crackleLpf);
     crackleLpf.connect(crackleGain);
     crackleGain.connect(spatialGain);
 
     flameSrc.start();
-    flameLfo.start();
-    crackleSrc.start();
+    flameLfoA.start();
+    flameLfoB.start();
+    sizzleSrc.start(0, 1.3);
+    sizzleLfoA.start();
+    sizzleLfoB.start();
+    crackleSrcA.start(0);
+    crackleSrcB.start(0, 4.1);
   }
 
   public updateSettings(next: AudioMixerSettings): void {

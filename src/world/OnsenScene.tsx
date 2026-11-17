@@ -1144,6 +1144,7 @@ export const OnsenScene = forwardRef<OnsenSceneHandle, OnsenSceneProps>(
           setActionMode('sitBench');
         } else if (arrival === 'footSoak') {
           setActionMode('footSoak');
+          avatar.showSpeechBubble('♨️ 발 담그니 노곤노곤하다냥~', 2.4);
         } else if (arrival === 'soak') {
           setActionMode('soak');
         } else if (arrival === 'loaf') {
