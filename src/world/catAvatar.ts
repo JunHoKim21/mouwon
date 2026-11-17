@@ -816,14 +816,14 @@ export function createCatAvatar(
       targetFrontLegScaleY = 0.36;
       targetBackLegScaleY = 0.36;
     } else if (isFootSoak) {
-      // Hind paws seated neatly on hinoki cushion while front paws dip deep into stream water
+      // Hind paws tucked neatly under body on hinoki cushion while front paws dip gently above stream water
       const paddle = Math.sin(elapsed * 2.2) * 0.11;
-      targetFL = -0.22 + paddle;
-      targetFR = -0.22 - paddle;
-      targetBL = -1.12;
-      targetBR = -1.12;
-      targetFrontLegScaleY = 1.42;
-      targetBackLegScaleY = 0.36;
+      targetFL = -0.52 + paddle;
+      targetFR = -0.52 - paddle;
+      targetBL = -1.15;
+      targetBR = -1.15;
+      targetFrontLegScaleY = 0.85;
+      targetBackLegScaleY = 0.30;
     } else if (inBathPosture && speedRatio > 0.04) {
       // Smooth underwater wading stride while moving inside the bath
       targetFL = 0.25 + Math.sin(walkPhase) * 0.32 * speedRatio;
@@ -845,15 +845,17 @@ export function createCatAvatar(
     const holdingBottlePaws = isDrinkingMilk || isHoldingMilk || isEatingEgg;
     const frontLegPivotZ = holdingBottlePaws
       ? 0.25
-      : isFootSoak || isKnead
-        ? 0.205
-        : 0.165;
+      : isFootSoak
+        ? 0.23
+        : isKnead
+          ? 0.205
+          : 0.165;
     const frontLegPivotY = holdingBottlePaws
       ? isDrinkingMilk || isEatingEgg
         ? 0.02
         : -0.01
       : isFootSoak
-        ? -0.075
+        ? -0.055
         : -0.06;
     const frontLegPivotX = holdingBottlePaws
       ? 0.095
@@ -912,7 +914,7 @@ export function createCatAvatar(
     else if (isGroom) targetRigY = -0.018 + breath * 0.4;
     else if (isKnead) targetRigY = -0.008 + Math.sin(actionTime * 4.4) * 0.018;
     else if (isLoaf) targetRigY = -0.128 + breath * 0.5;
-    else if (isFootSoak) targetRigY = -0.105 + breath * 0.4;
+    else if (isFootSoak) targetRigY = -0.115 + breath * 0.4;
     else if (isGreet) targetRigY = Math.sin(actionTime * 7.5) * 0.025;
 
     rig.position.y = THREE.MathUtils.damp(rig.position.y, targetRigY, 10, safeDt);
